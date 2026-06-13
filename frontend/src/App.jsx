@@ -1,4 +1,3 @@
-/* global __API_BASE__ */
 import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import Header from './components/Header'
@@ -9,9 +8,9 @@ import FastestGoalsTile from './components/FastestGoalsTile'
 import HatTrickTile from './components/HatTrickTile'
 import MostGoalsSingleGameTile from './components/MostGoalsSingleGameTile'
 import LoadingScreen from './components/LoadingScreen'
+import { fetchMatches, computeStats } from './utils/wcApi.js'
 
 const REFRESH_MS = 90_000
-const API = (typeof __API_BASE__ !== 'undefined' && __API_BASE__) ? __API_BASE__ : ''
 
 function ErrorBanner({ message }) {
   return (
@@ -23,8 +22,7 @@ function ErrorBanner({ message }) {
           <p className="font-semibold">API Error</p>
           <p className="text-red-500 dark:text-red-400/70 text-xs mt-0.5">{message}</p>
           <p className="text-red-400/70 text-xs mt-1">
-            Make sure the Python backend is running (<code className="bg-black/10 dark:bg-white/10 px-1 rounded">start.bat</code>).
-            Check the backend terminal window for the full error.
+            Check your internet connection — the dashboard fetches live data directly from worldcup26.ir.
           </p>
         </div>
       </div>
@@ -67,15 +65,9 @@ export default function App() {
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [mRes, sRes] = await Promise.all([
-        fetch(`${API}/api/matches`),
-        fetch(`${API}/api/stats`),
-      ])
-      if (!mRes.ok) throw new Error(await mRes.text())
-      if (!sRes.ok) throw new Error(await sRes.text())
-      const [mData, sData] = await Promise.all([mRes.json(), sRes.json()])
-      setMatches(mData.matches || [])
-      setStats(sData)
+      const allMatches = await fetchMatches()
+      setMatches(allMatches)
+      setStats(computeStats(allMatches))
       setError(null)
       setLastUpdated(new Date())
     } catch (e) {

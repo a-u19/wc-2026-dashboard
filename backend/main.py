@@ -162,11 +162,33 @@ def map_stage(game: dict) -> str:
 def parse_scorers(raw) -> list[str]:
     if not raw or str(raw).strip().lower() in ("null", "none", ""):
         return []
+
+    s = str(raw).strip()
+
+    # MongoDB set notation: {"Name1 ","Name1 +","Name2 "}
+    if s.startswith("{"):
+        s = s[1:-1] if s.endswith("}") else s[1:]
+
+    # Split on the boundary between quoted tokens: ","
+    # Falls back to plain comma split if no quotes present
+    if '"' in s:
+        parts = re.split(r'",\s*"', s)
+    else:
+        parts = s.split(",")
+
     names = []
-    for part in re.split(r"[,;]", str(raw)):
-        name = re.sub(r"\d+['′]?", "", part).strip()
+    for part in parts:
+        name = part.strip().strip('"').strip("'")
+        # Skip own goals — they don't count toward a player's hat-trick
+        if re.search(r'\(OG\)', name, re.IGNORECASE):
+            continue
+        # Strip trailing repeat markers (+), minute annotations (45'), whitespace
+        name = re.sub(r"\s*\+\s*$", "", name)
+        name = re.sub(r"\s*\d+[''′]?\s*$", "", name)
+        name = name.strip()
         if name:
             names.append(name)
+
     return names
 
 
