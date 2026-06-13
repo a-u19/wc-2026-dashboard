@@ -2,6 +2,42 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { format, parseISO } from 'date-fns'
 import TileShell from './TileShell'
+import broadcastSchedule from '../data/broadcastSchedule.json'
+
+// Normalise team names to handle API vs schedule name differences
+const ALIASES = {
+  'united states': 'usa',
+  'us': 'usa',
+  "côte d'ivoire": 'ivory coast',
+  'cote divoire': 'ivory coast',
+  'republic of ireland': 'ireland',
+  'democratic republic of congo': 'dr congo',
+  'congo dr': 'dr congo',
+  'bosnia & herzegovina': 'bosnia-herzegovina',
+  'bosnia and herzegovina': 'bosnia-herzegovina',
+  'curaçao': 'curacao',
+  'czechia': 'czech republic',
+}
+function normTeam(t) {
+  if (!t) return ''
+  const s = t.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+  return ALIASES[s] ?? s
+}
+
+// Build lookup: "YYYY-MM-DD|teamA|teamB" (sorted teams) → entry
+const broadcastLookup = new Map()
+broadcastSchedule.forEach(entry => {
+  const key = `${entry.date}|${[normTeam(entry.home), normTeam(entry.away)].sort().join('|')}`
+  broadcastLookup.set(key, entry)
+})
+
+function getBroadcast(match) {
+  const date = match.utcDate?.slice(0, 10)
+  const home = normTeam(match.homeTeam?.name || match.homeTeam?.shortName)
+  const away = normTeam(match.awayTeam?.name || match.awayTeam?.shortName)
+  if (!date || !home || !away) return null
+  return broadcastLookup.get(`${date}|${[home, away].sort().join('|')}`) ?? null
+}
 
 const STATUS_BADGE = {
   FINISHED:  { label: 'FT',       cls: 'bg-surface text-tx-2' },
@@ -150,6 +186,11 @@ function TeamCombobox({ teams, value, onChange }) {
   )
 }
 
+const BROADCASTER_STYLE = {
+  BBC: { label: 'BBC', cls: 'bg-[#000] text-white' },
+  ITV: { label: 'ITV', cls: 'bg-[#f4c400] text-black' },
+}
+
 // ── Match card ─────────────────────────────────────────────────────────────────
 function MatchCard({ m, index }) {
   const date = parseISO(m.utcDate)
@@ -158,6 +199,7 @@ function MatchCard({ m, index }) {
   const homeScore = m.score?.fullTime?.home ?? m.score?.halfTime?.home ?? null
   const awayScore = m.score?.fullTime?.away ?? m.score?.halfTime?.away ?? null
   const hasScore = homeScore !== null
+  const broadcast = getBroadcast(m)
 
   return (
     <motion.div
@@ -174,7 +216,14 @@ function MatchCard({ m, index }) {
         <span className="text-xs text-tx-3 uppercase tracking-wider truncate max-w-[55%]">
           {m.stage?.replace(/_/g, ' ')}{m.group ? ` · ${m.group}` : ''}
         </span>
-        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${badge.cls}`}>{badge.label}</span>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {broadcast && BROADCASTER_STYLE[broadcast.broadcaster] && (
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${BROADCASTER_STYLE[broadcast.broadcaster].cls}`}>
+              {BROADCASTER_STYLE[broadcast.broadcaster].label}
+            </span>
+          )}
+          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${badge.cls}`}>{badge.label}</span>
+        </div>
       </div>
 
       <div className="flex items-center gap-2">
