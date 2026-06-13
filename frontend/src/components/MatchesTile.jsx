@@ -1,16 +1,156 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { format, parseISO } from 'date-fns'
 import TileShell from './TileShell'
 
 const STATUS_BADGE = {
-  FINISHED: { label: 'FT', cls: 'bg-surface text-tx-2' },
-  IN_PLAY:  { label: 'LIVE', cls: 'bg-red-500 text-white animate-pulse' },
-  PAUSED:   { label: 'HT',   cls: 'bg-orange-400 text-white' },
-  SCHEDULED:{ label: 'UPCOMING', cls: 'bg-accent-soft text-accent' },
-  TIMED:    { label: 'UPCOMING', cls: 'bg-accent-soft text-accent' },
+  FINISHED:  { label: 'FT',       cls: 'bg-surface text-tx-2' },
+  IN_PLAY:   { label: 'LIVE',     cls: 'bg-red-500 text-white animate-pulse' },
+  PAUSED:    { label: 'HT',       cls: 'bg-orange-400 text-white' },
+  SCHEDULED: { label: 'UPCOMING', cls: 'bg-accent-soft text-accent' },
+  TIMED:     { label: 'UPCOMING', cls: 'bg-accent-soft text-accent' },
 }
 
+// ── Team combobox ──────────────────────────────────────────────────────────────
+function TeamCombobox({ teams, value, onChange }) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const [cursor, setCursor] = useState(-1)
+  const inputRef = useRef(null)
+  const listRef = useRef(null)
+  const wrapRef = useRef(null)
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return teams
+    return teams.filter(t => t.toLowerCase().includes(q))
+  }, [teams, query])
+
+  // Close on outside click
+  useEffect(() => {
+    function handle(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false)
+        setQuery('')
+        setCursor(-1)
+      }
+    }
+    document.addEventListener('mousedown', handle)
+    return () => document.removeEventListener('mousedown', handle)
+  }, [])
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (cursor >= 0 && listRef.current) {
+      const item = listRef.current.children[cursor]
+      item?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [cursor])
+
+  function select(team) {
+    onChange(team)
+    setOpen(false)
+    setQuery('')
+    setCursor(-1)
+    inputRef.current?.blur()
+  }
+
+  function handleKey(e) {
+    if (!open && (e.key === 'ArrowDown' || e.key === 'Enter')) {
+      setOpen(true)
+      return
+    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setCursor(c => Math.min(c + 1, filtered.length - 1)) }
+    if (e.key === 'ArrowUp')   { e.preventDefault(); setCursor(c => Math.max(c - 1, 0)) }
+    if (e.key === 'Enter' && cursor >= 0) select(filtered[cursor])
+    if (e.key === 'Escape') { setOpen(false); setQuery(''); setCursor(-1) }
+  }
+
+  const displayValue = open ? query : (value === 'All' ? '' : value)
+  const placeholder = value === 'All' ? 'Filter by team…' : value
+
+  return (
+    <div ref={wrapRef} className="relative w-full sm:w-52">
+      <div className={`flex items-center gap-1.5 bg-surface border rounded-lg px-2.5 py-1.5 transition-all
+        ${open ? 'border-accent ring-1 ring-accent/20' : 'border-[var(--card-border)] hover:border-accent/50'}`}>
+        {/* Search icon */}
+        <svg className="w-3.5 h-3.5 text-tx-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+        </svg>
+
+        <input
+          ref={inputRef}
+          value={displayValue}
+          placeholder={placeholder}
+          onChange={e => { setQuery(e.target.value); setOpen(true); setCursor(-1) }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={handleKey}
+          className="flex-1 bg-transparent text-tx-1 text-xs font-medium outline-none placeholder:text-tx-3 min-w-0"
+        />
+
+        {/* Clear / crest of selected team */}
+        {value !== 'All' && !open && (
+          <button
+            onClick={() => { onChange('All'); setQuery('') }}
+            className="text-tx-3 hover:text-tx-1 transition-colors text-sm leading-none flex-shrink-0"
+            title="Clear filter"
+          >
+            ✕
+          </button>
+        )}
+        {open && query && (
+          <button
+            onClick={() => { setQuery(''); setCursor(-1) }}
+            className="text-tx-3 hover:text-tx-1 transition-colors text-sm leading-none flex-shrink-0"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
+      {/* Dropdown */}
+      <AnimatePresence>
+        {open && (
+          <motion.ul
+            ref={listRef}
+            initial={{ opacity: 0, y: -4, scaleY: 0.95 }}
+            animate={{ opacity: 1, y: 0, scaleY: 1 }}
+            exit={{ opacity: 0, y: -4, scaleY: 0.95 }}
+            transition={{ duration: 0.12 }}
+            style={{ transformOrigin: 'top', background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}
+            className="absolute z-50 mt-1 w-full max-h-52 overflow-y-auto rounded-xl border shadow-lg py-1"
+          >
+            {filtered.length === 0 ? (
+              <li className="px-3 py-2 text-xs text-tx-3 text-center">No teams match "{query}"</li>
+            ) : (
+              filtered.map((team, i) => {
+                const isSelected = team === value
+                const isActive = i === cursor
+                return (
+                  <li
+                    key={team}
+                    onMouseDown={() => select(team)}
+                    onMouseEnter={() => setCursor(i)}
+                    className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors
+                      ${isActive ? 'bg-accent-soft text-accent' : ''}
+                      ${isSelected && !isActive ? 'text-accent' : 'text-tx-1'}
+                      ${!isActive && !isSelected ? 'hover:bg-[var(--card-hover)]' : ''}`}
+                  >
+                    {isSelected && <span className="text-accent">✓</span>}
+                    {!isSelected && <span className="w-3.5" />}
+                    {team}
+                  </li>
+                )
+              })
+            )}
+          </motion.ul>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+// ── Match card ─────────────────────────────────────────────────────────────────
 function MatchCard({ m, index }) {
   const date = parseISO(m.utcDate)
   const badge = STATUS_BADGE[m.status] || { label: m.status, cls: 'bg-surface text-tx-2' }
@@ -23,14 +163,13 @@ function MatchCard({ m, index }) {
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.035 }}
+      transition={{ delay: index * 0.03 }}
       whileHover={{ scale: 1.01, y: -1 }}
       className={`rounded-xl p-3 mb-2 last:mb-0 border transition-all duration-150 cursor-default
         ${isLive
           ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-500/30 shadow-[0_0_20px_rgba(239,68,68,0.1)]'
           : 'bg-[var(--card-hover)] border-[var(--card-border)] hover:border-[var(--accent-soft)] hover:shadow-md'}`}
     >
-      {/* Stage row */}
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs text-tx-3 uppercase tracking-wider truncate max-w-[55%]">
           {m.stage?.replace(/_/g, ' ')}{m.group ? ` · ${m.group}` : ''}
@@ -38,13 +177,10 @@ function MatchCard({ m, index }) {
         <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${badge.cls}`}>{badge.label}</span>
       </div>
 
-      {/* Teams + Score */}
       <div className="flex items-center gap-2">
         <div className="flex-1 flex items-center gap-2 min-w-0">
           {m.homeTeam?.crest && <img src={m.homeTeam.crest} alt="" className="w-6 h-6 object-contain flex-shrink-0" />}
-          <span className="text-sm font-semibold text-tx-1 truncate">
-            {m.homeTeam?.shortName || m.homeTeam?.name}
-          </span>
+          <span className="text-sm font-semibold text-tx-1 truncate">{m.homeTeam?.shortName || m.homeTeam?.name}</span>
         </div>
 
         <div className={`flex-shrink-0 text-center px-3 py-1 rounded-lg min-w-[64px] ${hasScore ? 'bg-surface-2' : 'bg-surface'}`}>
@@ -58,9 +194,7 @@ function MatchCard({ m, index }) {
         </div>
 
         <div className="flex-1 flex items-center gap-2 justify-end min-w-0">
-          <span className="text-sm font-semibold text-tx-1 truncate text-right">
-            {m.awayTeam?.shortName || m.awayTeam?.name}
-          </span>
+          <span className="text-sm font-semibold text-tx-1 truncate text-right">{m.awayTeam?.shortName || m.awayTeam?.name}</span>
           {m.awayTeam?.crest && <img src={m.awayTeam.crest} alt="" className="w-6 h-6 object-contain flex-shrink-0" />}
         </div>
       </div>
@@ -72,6 +206,7 @@ function MatchCard({ m, index }) {
   )
 }
 
+// ── Main tile ──────────────────────────────────────────────────────────────────
 export default function MatchesTile({ matches = [] }) {
   const [tab, setTab] = useState('upcoming')
   const [selectedTeam, setSelectedTeam] = useState('All')
@@ -87,7 +222,7 @@ export default function MatchesTile({ matches = [] }) {
     return ['All', ...Array.from(set).sort()]
   }, [matches])
 
-  const filterByTeam = (list) =>
+  const filterByTeam = list =>
     selectedTeam === 'All'
       ? list
       : list.filter(m =>
@@ -96,9 +231,9 @@ export default function MatchesTile({ matches = [] }) {
         )
 
   const { upcoming, past, live } = useMemo(() => {
-    const live = matches.filter(m => m.status === 'IN_PLAY' || m.status === 'PAUSED')
+    const live     = matches.filter(m => m.status === 'IN_PLAY' || m.status === 'PAUSED')
     const upcoming = matches.filter(m => m.status === 'SCHEDULED' || m.status === 'TIMED').slice(0, 20)
-    const past = matches.filter(m => m.status === 'FINISHED').slice(-20).reverse()
+    const past     = matches.filter(m => m.status === 'FINISHED').slice(-20).reverse()
     return { live, upcoming, past }
   }, [matches])
 
@@ -129,9 +264,8 @@ export default function MatchesTile({ matches = [] }) {
         )}
       </AnimatePresence>
 
-      {/* Controls row: tabs + team filter */}
+      {/* Controls: tabs + combobox */}
       <div className="flex flex-col sm:flex-row gap-2 mb-3">
-        {/* Tabs */}
         <div className="flex gap-1.5 flex-1">
           {['upcoming', 'results'].map(t => (
             <button
@@ -142,38 +276,22 @@ export default function MatchesTile({ matches = [] }) {
                   ? 'bg-green-600 text-white shadow-sm'
                   : 'bg-surface text-tx-2 hover:text-tx-1 hover:bg-[var(--card-hover)]'}`}
             >
-              {t === 'upcoming' ? `Upcoming (${filterByTeam(upcoming).length})` : `Results (${filterByTeam(past).length})`}
+              {t === 'upcoming'
+                ? `Upcoming (${filterByTeam(upcoming).length})`
+                : `Results (${filterByTeam(past).length})`}
             </button>
           ))}
         </div>
 
-        {/* Team filter */}
-        <div className="relative">
-          <select
-            value={selectedTeam}
-            onChange={e => setSelectedTeam(e.target.value)}
-            className="appearance-none w-full sm:w-44 bg-surface border border-[var(--card-border)] text-tx-1 text-xs font-medium
-              rounded-lg px-3 py-1.5 pr-7 cursor-pointer outline-none
-              hover:border-accent focus:border-accent focus:ring-1 focus:ring-accent/30 transition-all"
-          >
-            {teams.map(t => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-tx-3 text-xs">▾</span>
-        </div>
+        <TeamCombobox teams={teams} value={selectedTeam} onChange={setSelectedTeam} />
       </div>
 
       {/* Match list */}
       <div className="overflow-y-auto max-h-[440px] pr-1">
         <AnimatePresence mode="wait">
           {displayed.length === 0 ? (
-            <motion.p
-              key="empty"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="text-center text-tx-3 text-sm py-10"
-            >
+            <motion.p key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              className="text-center text-tx-3 text-sm py-10">
               {selectedTeam === 'All' ? 'No matches yet' : `No matches found for ${selectedTeam}`}
             </motion.p>
           ) : (
