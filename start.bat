@@ -16,12 +16,12 @@ echo.
 echo Starting Python backend on :8000...
 start "WC Backend" cmd /k "cd /d "%~dp0backend" && python -m uvicorn main:app --reload --port 8000"
 
-timeout /t 2 /nobreak >/dev/null
+timeout /t 5 /nobreak >nul
 
 echo Starting Vite frontend on :5173...
 start "WC Frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"
 
-timeout /t 4 /nobreak >/dev/null
+timeout /t 4 /nobreak >nul
 
 echo.
 echo Dashboard should be running at: http://localhost:5173

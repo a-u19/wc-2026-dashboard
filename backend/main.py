@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import time
@@ -11,9 +12,16 @@ from fastapi.responses import JSONResponse
 import httpx
 from dotenv import load_dotenv
 
+import cards_fetcher
+
 load_dotenv()
 
 app = FastAPI(title="World Cup 2026 API")
+
+
+@app.on_event("startup")
+async def startup():
+    asyncio.create_task(cards_fetcher.background_loop())
 
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"])
@@ -180,8 +188,8 @@ def parse_scorers(raw) -> list[tuple[str, str | None]]:
         token = part.strip().strip('"').strip()
         if not token or re.search(r'\(OG\)', token, re.IGNORECASE):
             continue
-        # Minute formats: "9'" simple, "45'+5" stoppage time (apostrophe comes before +N)
-        m = re.search(r"\s+(\d+'(?:\+\d+)?)\s*$", token)
+        # Minute formats: "9'", "45'+5", "45'+5'" (API includes trailing prime on extra time)
+        m = re.search(r"\s+(\d+'(?:\+\d+'?)?)\s*$", token)
         if m:
             minute = m.group(1)
             name = token[:m.start()].strip()
@@ -288,6 +296,18 @@ async def get_stats():
     hat_tricks: list            = []
     hat_trick_race_entries: list = []
     most_goals_single: list     = []
+    fastest_goals: list         = []
+
+    def minute_to_int(m: str | None) -> float:
+        """Convert '9'' → 9, '45'+5'' → 50, None → inf (so goals with no minute sort last)."""
+        if not m:
+            return float("inf")
+        digits = re.findall(r"\d+", m)
+        if not digits:
+            return float("inf")
+        base = int(digits[0])
+        extra = int(digits[1]) if len(digits) > 1 else 0
+        return base + extra
 
     for g in games:
         if map_status(g) != "FINISHED":
@@ -321,10 +341,25 @@ async def get_stats():
             (g.get("home_scorers"), home_name, home_crest),
             (g.get("away_scorers"), away_name, away_crest),
         ]:
+            if raw_scorers and str(raw_scorers).strip() not in ("null", "None", ""):
+                print(f"[SCORERS] {side_name}: {raw_scorers!r}")
             pairs = parse_scorers(raw_scorers)
+            if pairs:
+                print(f"[PARSED]  {pairs}")
             player_minutes: dict[str, list] = defaultdict(list)
             for pname, minute in pairs:
                 player_minutes[pname].append(minute)
+                if minute:
+                    fastest_goals.append({
+                        "player":    pname,
+                        "team":      side_name,
+                        "crest":     side_crest,
+                        "minute":    minute,
+                        "minuteInt": minute_to_int(minute),
+                        "home":      home_name,
+                        "away":      away_name,
+                        "matchDate": match_date,
+                    })
             for player_name, minutes in player_minutes.items():
                 count = len(minutes)
                 entry = {
@@ -351,15 +386,17 @@ async def get_stats():
     goals_list_least         = sorted([g for g in goals_by_team.values() if g["played"] > 0],
                                        key=lambda x: (x["scored"], -x["played"]))
     most_goals_single_sorted = sorted(most_goals_single, key=lambda x: x["total"], reverse=True)
-    hat_trick_race_sorted    = sorted(hat_trick_race_entries, key=lambda x: (-x["goals"], x["matchDate"]))
+    # Most goals first; ties broken by most recent match (stable two-pass sort)
+    hat_trick_race_sorted    = sorted(hat_trick_race_entries, key=lambda x: x["matchDate"] or "", reverse=True)
+    hat_trick_race_sorted    = sorted(hat_trick_race_sorted, key=lambda x: x["goals"], reverse=True)
     hat_trick_winner         = sorted(hat_tricks, key=lambda x: x["matchDate"])[0] if hat_tricks else None
 
     return {
-        "mostCards":           [],
+        "mostCards":           cards_fetcher.get_cards_by_team()[:10],
         "leastGoals":          goals_list_least[:10],
-        "fastestGoals":        [],
+        "fastestGoals":        sorted(fastest_goals, key=lambda x: x["minuteInt"])[:10],
         "hatTrick":            hat_trick_winner,
-        "hatTrickRace":        hat_trick_race_sorted[:10],
+        "hatTrickRace":        hat_trick_race_sorted[:3],
         "mostGoalsSingleGame": most_goals_single_sorted[:5],
     }
 

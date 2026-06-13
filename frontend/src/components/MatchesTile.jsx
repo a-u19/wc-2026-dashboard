@@ -216,8 +216,9 @@ export default function MatchesTile({ matches = [] }) {
     matches.forEach(m => {
       const h = m.homeTeam?.shortName || m.homeTeam?.name
       const a = m.awayTeam?.shortName || m.awayTeam?.name
-      if (h) set.add(h)
-      if (a) set.add(a)
+      const isPlaceholder = t => !t || /^(TBD|3rd Group|Winner|Loser|Match \d)/i.test(t)
+      if (h && !isPlaceholder(h)) set.add(h)
+      if (a && !isPlaceholder(a)) set.add(a)
     })
     return ['All', ...Array.from(set).sort()]
   }, [matches])
@@ -232,8 +233,8 @@ export default function MatchesTile({ matches = [] }) {
 
   const { upcoming, past, live } = useMemo(() => {
     const live     = matches.filter(m => m.status === 'IN_PLAY' || m.status === 'PAUSED')
-    const upcoming = matches.filter(m => m.status === 'SCHEDULED' || m.status === 'TIMED').slice(0, 20)
-    const past     = matches.filter(m => m.status === 'FINISHED').slice(-20).reverse()
+    const upcoming = matches.filter(m => m.status === 'SCHEDULED' || m.status === 'TIMED')
+    const past     = matches.filter(m => m.status === 'FINISHED').reverse()
     return { live, upcoming, past }
   }, [matches])
 

@@ -12,7 +12,7 @@ def parse_scorers(raw):
         token = part.strip().strip('"').strip()
         if not token or re.search(r'\(OG\)', token, re.IGNORECASE):
             continue
-        m = re.search(r"\s+(\d+'(?:\+\d+)?)\s*$", token)
+        m = re.search(r"\s+(\d+'(?:\+\d+'?)?)\s*$", token)
         if m:
             minute = m.group(1)
             name = token[:m.start()].strip()
@@ -26,8 +26,8 @@ def parse_scorers(raw):
 tests = [
     ('{"J. Quiñones 9\'","R. Jiménez 67\'"}',
      [("J. Quiñones", "9'"), ("R. Jiménez", "67'")]),
-    ('{"F. Balogun 31\'","F. Balogun 45\'+5","G. Reyna 90\'+8"}',
-     [("F. Balogun", "31'"), ("F. Balogun", "45'+5"), ("G. Reyna", "90'+8")]),
+    ('{"F. Balogun 31\'","F. Balogun 45\'+5\'","G. Reyna 90\'+8\'"}',
+     [("F. Balogun", "31'"), ("F. Balogun", "45'+5'"), ("G. Reyna", "90'+8'")]),
     ('{"C. Larin 11\'"}',
      [("C. Larin", "11'")]),
     ('{"I.B. Hwang 67\'","H.G. Oh 80\'"}',
