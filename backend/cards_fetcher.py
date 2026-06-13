@@ -143,12 +143,19 @@ async def _fetch_cycle():
 
 
 async def background_loop():
-    """Runs forever; fetches card data every 36 min during the 20:00–08:00 BST window."""
+    """Runs forever; fetches card data every 5 min during the 20:00–08:00 BST window.
+    Also runs once immediately on startup regardless of window to populate the fixture list."""
     print("[CARDS] Background fetcher started.")
-    # Small initial delay so the app is fully up before first attempt
-    await asyncio.sleep(10)
+    await asyncio.sleep(10)  # let the app finish starting up
+
+    # Always attempt one fetch on startup so the fixture list is populated immediately
+    try:
+        await _fetch_cycle()
+    except Exception as e:
+        print(f"[CARDS] Startup fetch error: {e}")
 
     while True:
+        await asyncio.sleep(CYCLE_SECONDS)
         if _in_window():
             try:
                 await _fetch_cycle()
@@ -156,5 +163,3 @@ async def background_loop():
                 print(f"[CARDS] Fetch cycle error: {e}")
         else:
             print("[CARDS] Outside 20:00–08:00 BST window, sleeping.")
-
-        await asyncio.sleep(CYCLE_SECONDS)
