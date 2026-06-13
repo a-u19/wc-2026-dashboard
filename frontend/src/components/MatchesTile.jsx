@@ -24,19 +24,18 @@ function normTeam(t) {
   return ALIASES[s] ?? s
 }
 
-// Build lookup: "YYYY-MM-DD|teamA|teamB" (sorted teams) → entry
+// Build lookup by sorted team pair — each group-stage pair plays once so no date needed
 const broadcastLookup = new Map()
 broadcastSchedule.forEach(entry => {
-  const key = `${entry.date}|${[normTeam(entry.home), normTeam(entry.away)].sort().join('|')}`
+  const key = [normTeam(entry.home), normTeam(entry.away)].sort().join('|')
   broadcastLookup.set(key, entry)
 })
 
 function getBroadcast(match) {
-  const date = match.utcDate?.slice(0, 10)
   const home = normTeam(match.homeTeam?.name || match.homeTeam?.shortName)
   const away = normTeam(match.awayTeam?.name || match.awayTeam?.shortName)
-  if (!date || !home || !away) return null
-  return broadcastLookup.get(`${date}|${[home, away].sort().join('|')}`) ?? null
+  if (!home || !away) return null
+  return broadcastLookup.get([home, away].sort().join('|')) ?? null
 }
 
 const STATUS_BADGE = {
