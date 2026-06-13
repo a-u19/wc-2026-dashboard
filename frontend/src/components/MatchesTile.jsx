@@ -26,18 +26,42 @@ function normTeam(t) {
   return ALIASES[s] ?? s
 }
 
-// Build lookup by sorted team pair — each group-stage pair plays once so no date needed
+// Build lookups by sorted team pair — each group-stage pair plays once so no date needed
 const broadcastLookup = new Map()
+// sortKeyLookup: team pair → "YYYY-MM-DDTHH:mm" in BST for correct chronological sort
+const sortKeyLookup = new Map()
+
 broadcastSchedule.forEach(entry => {
   const key = [normTeam(entry.home), normTeam(entry.away)].sort().join('|')
   broadcastLookup.set(key, entry)
+  sortKeyLookup.set(key, `${entry.date}T${entry.kickoffBst}`)
 })
 
-function getBroadcast(match) {
+function teamPairKey(match) {
   const home = normTeam(match.homeTeam?.name || match.homeTeam?.shortName)
   const away = normTeam(match.awayTeam?.name || match.awayTeam?.shortName)
   if (!home || !away) return null
-  return broadcastLookup.get([home, away].sort().join('|')) ?? null
+  return [home, away].sort().join('|')
+}
+
+function getBroadcast(match) {
+  const key = teamPairKey(match)
+  return key ? (broadcastLookup.get(key) ?? null) : null
+}
+
+function getMatchSortKey(match) {
+  const key = teamPairKey(match)
+  return (key && sortKeyLookup.get(key)) || match.utcDate || 'z'
+}
+
+// Derive whether a match is likely live based on BST kickoff time (fallback when API lags)
+function isLikelyLive(match) {
+  const b = getBroadcast(match)
+  if (!b) return false
+  const kickoff = new Date(`${b.date}T${b.kickoffBst}:00+01:00`)
+  const now = Date.now()
+  const elapsed = (now - kickoff.getTime()) / 60000  // minutes
+  return elapsed >= 0 && elapsed < 115  // within 115 minutes of kickoff
 }
 
 const STATUS_BADGE = {
@@ -195,14 +219,17 @@ const BROADCASTER_STYLE = {
 // ── Match card ─────────────────────────────────────────────────────────────────
 function MatchCard({ m, index }) {
   const broadcast = getBroadcast(m)
+  const likelyLive = isLikelyLive(m)
+  const effectiveStatus = (likelyLive && (m.status === 'SCHEDULED' || m.status === 'TIMED'))
+    ? 'IN_PLAY' : m.status
   // API local_date is stamped as UTC but is actually venue local time — use BST kickoff from
   // broadcast schedule when available, otherwise fall back to the (incorrect) utcDate
   const displayTime = broadcast ? broadcast.kickoffBst : format(parseISO(m.utcDate), 'HH:mm')
   const displayDate = broadcast
     ? format(parseISO(broadcast.date), 'EEE d MMM yyyy')
     : format(parseISO(m.utcDate), 'EEE d MMM yyyy')
-  const badge = STATUS_BADGE[m.status] || { label: m.status, cls: 'bg-surface text-tx-2' }
-  const isLive = m.status === 'IN_PLAY' || m.status === 'PAUSED'
+  const badge = STATUS_BADGE[effectiveStatus] || { label: effectiveStatus, cls: 'bg-surface text-tx-2' }
+  const isLive = effectiveStatus === 'IN_PLAY' || effectiveStatus === 'PAUSED'
   const homeScore = m.score?.fullTime?.home ?? m.score?.halfTime?.home ?? null
   const awayScore = m.score?.fullTime?.away ?? m.score?.halfTime?.away ?? null
   const hasScore = homeScore !== null
@@ -286,18 +313,16 @@ export default function MatchesTile({ matches = [] }) {
           (m.awayTeam?.shortName || m.awayTeam?.name) === selectedTeam
         )
 
-  const matchSortKey = m => {
-    const b = getBroadcast(m)
-    if (b) return `${b.date}T${b.kickoffBst}`
-    return m.utcDate || ''
-  }
-
   const { upcoming, past, live } = useMemo(() => {
-    const live     = matches.filter(m => m.status === 'IN_PLAY' || m.status === 'PAUSED')
+    const isApiLive = m => m.status === 'IN_PLAY' || m.status === 'PAUSED'
+    const live = matches.filter(m => isApiLive(m) || (
+      (m.status === 'SCHEDULED' || m.status === 'TIMED') && isLikelyLive(m)
+    ))
+    const liveIds = new Set(live.map(m => m.id))
     const upcoming = matches
-      .filter(m => m.status === 'SCHEDULED' || m.status === 'TIMED')
-      .sort((a, b) => matchSortKey(a).localeCompare(matchSortKey(b)))
-    const past     = matches.filter(m => m.status === 'FINISHED').reverse()
+      .filter(m => (m.status === 'SCHEDULED' || m.status === 'TIMED') && !liveIds.has(m.id))
+      .sort((a, b) => getMatchSortKey(a).localeCompare(getMatchSortKey(b)))
+    const past = matches.filter(m => m.status === 'FINISHED').reverse()
     return { live, upcoming, past }
   }, [matches])
 
