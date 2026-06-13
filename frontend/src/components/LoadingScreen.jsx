@@ -2,7 +2,7 @@ import { motion } from 'framer-motion'
 
 export default function LoadingScreen() {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-pitch-950">
+    <div className="min-h-screen flex flex-col items-center justify-center" style={{ background: 'var(--page-bg)' }}>
       <motion.div
         animate={{ rotate: 360 }}
         transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
@@ -13,9 +13,9 @@ export default function LoadingScreen() {
       <motion.p
         animate={{ opacity: [0.4, 1, 0.4] }}
         transition={{ duration: 1.5, repeat: Infinity }}
-        className="text-green-400 font-display tracking-widest text-sm"
+        className="text-accent font-display tracking-widest text-sm"
       >
-        LOADING WORLD CUP DATA...
+        LOADING WORLD CUP DATA…
       </motion.p>
     </div>
   )

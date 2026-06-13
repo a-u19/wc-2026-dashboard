@@ -1,3 +1,4 @@
+/* global __API_BASE__ */
 import { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import Header from './components/Header'
@@ -10,23 +11,20 @@ import MostGoalsSingleGameTile from './components/MostGoalsSingleGameTile'
 import LoadingScreen from './components/LoadingScreen'
 
 const REFRESH_MS = 90_000
-const API = typeof __API_BASE__ !== 'undefined' ? __API_BASE__ : ''
+const API = (typeof __API_BASE__ !== 'undefined' && __API_BASE__) ? __API_BASE__ : ''
 
 function ErrorBanner({ message }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="max-w-7xl mx-auto px-4 mb-4"
-    >
-      <div className="bg-red-900/30 border border-red-500/30 rounded-xl px-4 py-3 text-sm text-red-300 flex items-start gap-2">
-        <span>⚠️</span>
+    <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-4">
+      <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-500/30
+        rounded-xl px-4 py-3 text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
+        <span className="mt-0.5">⚠️</span>
         <div>
           <p className="font-semibold">API Error</p>
-          <p className="text-red-400/70 text-xs mt-0.5">{message}</p>
-          <p className="text-red-400/50 text-xs mt-1">
-            Make sure your <code className="bg-white/10 px-1 rounded">FOOTBALL_API_KEY</code> is set in{' '}
-            <code className="bg-white/10 px-1 rounded">backend/.env</code> and the Python server is running.
+          <p className="text-red-500 dark:text-red-400/70 text-xs mt-0.5">{message}</p>
+          <p className="text-red-400/70 text-xs mt-1">
+            Make sure <code className="bg-black/10 dark:bg-white/10 px-1 rounded">FOOTBALL_API_KEY</code> is set in{' '}
+            <code className="bg-black/10 dark:bg-white/10 px-1 rounded">backend/.env</code> and the Python server is running.
           </p>
         </div>
       </div>
@@ -36,24 +34,35 @@ function ErrorBanner({ message }) {
 
 function PitchBackground() {
   return (
-    <div className="fixed inset-0 pointer-events-none overflow-hidden">
-      {/* Subtle green gradient bg */}
-      <div className="absolute inset-0 bg-gradient-to-b from-pitch-900 via-pitch-950 to-pitch-950" />
-      {/* Pitch stripe pattern */}
-      <div className="absolute inset-0 pitch-lines opacity-100" />
-      {/* Corner glows */}
-      <div className="absolute top-0 left-0 w-96 h-96 bg-green-900/15 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2" />
-      <div className="absolute bottom-0 right-0 w-96 h-96 bg-green-800/10 rounded-full blur-3xl translate-x-1/2 translate-y-1/2" />
+    <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
+      <div className="absolute inset-0" style={{ background: 'var(--page-bg)', transition: 'background 0.3s ease' }} />
+      <div className="absolute inset-0 pitch-lines" />
+      <div className="absolute top-0 left-0 w-80 h-80 bg-green-500/5 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2" />
+      <div className="absolute bottom-0 right-0 w-80 h-80 bg-green-500/5 rounded-full blur-3xl translate-x-1/2 translate-y-1/2" />
     </div>
   )
 }
 
 export default function App() {
+  const [theme, setTheme] = useState(() => localStorage.getItem('wc-theme') || 'light')
   const [matches, setMatches] = useState([])
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [lastUpdated, setLastUpdated] = useState(null)
+
+  // Apply theme class to <html>
+  useEffect(() => {
+    const root = document.documentElement
+    if (theme === 'dark') {
+      root.classList.add('dark')
+    } else {
+      root.classList.remove('dark')
+    }
+    localStorage.setItem('wc-theme', theme)
+  }, [theme])
+
+  const toggleTheme = () => setTheme(t => t === 'light' ? 'dark' : 'light')
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -85,11 +94,17 @@ export default function App() {
   if (loading && !stats && !error) return <LoadingScreen />
 
   return (
-    <div className="relative min-h-screen text-white">
+    <div className="relative min-h-screen">
       <PitchBackground />
 
       <div className="relative z-10">
-        <Header lastUpdated={lastUpdated} onRefresh={fetchAll} loading={loading} />
+        <Header
+          lastUpdated={lastUpdated}
+          onRefresh={fetchAll}
+          loading={loading}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+        />
 
         <main className="max-w-7xl mx-auto px-3 sm:px-4 py-6">
           {error && <ErrorBanner message={error} />}
@@ -109,7 +124,8 @@ export default function App() {
               <MostGoalsSingleGameTile data={stats.mostGoalsSingleGame} />
             </div>
           )}
-          <p className="text-center text-white/20 text-xs mt-8 pb-4">
+
+          <p className="text-center text-tx-3 text-xs mt-8 pb-4">
             Data via football-data.org · Refreshes every 90s · FIFA World Cup 2026 🏆
           </p>
         </main>

@@ -3,44 +3,93 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Light theme (default) ─────────────────────────────────── */
 :root {
+  --page-bg: #edf5ee;
+  --card-bg: rgba(255, 255, 255, 0.92);
+  --card-border: rgba(0, 0, 0, 0.07);
+  --card-hover: rgba(0, 0, 0, 0.02);
+  --surface: rgba(0, 0, 0, 0.04);
+  --surface-2: rgba(0, 0, 0, 0.06);
+  --divider: rgba(0, 0, 0, 0.07);
+  --tx1: #0d1f10;
+  --tx2: #3d6644;
+  --tx3: #8aab8f;
+  --accent: #16a34a;
+  --accent-soft: rgba(22, 163, 74, 0.1);
+  --header-bg: rgba(255, 255, 255, 0.88);
+  --tile-shadow: rgba(0, 0, 0, 0.06);
+  --tile-shadow-hover: rgba(0, 0, 0, 0.14);
+  --stripe: rgba(0, 100, 30, 0.04);
+  --shimmer-from: #15803d;
+  --shimmer-mid: #16a34a;
+  --shimmer-to: #15803d;
+  color-scheme: light;
+}
+
+/* ── Dark theme ─────────────────────────────────────────────── */
+.dark {
+  --page-bg: #020b06;
+  --card-bg: rgba(7, 31, 13, 0.75);
+  --card-border: rgba(255, 255, 255, 0.06);
+  --card-hover: rgba(255, 255, 255, 0.03);
+  --surface: rgba(255, 255, 255, 0.05);
+  --surface-2: rgba(255, 255, 255, 0.1);
+  --divider: rgba(255, 255, 255, 0.06);
+  --tx1: #f1f5f9;
+  --tx2: rgba(255, 255, 255, 0.55);
+  --tx3: rgba(255, 255, 255, 0.25);
+  --accent: #4ade80;
+  --accent-soft: rgba(74, 222, 128, 0.1);
+  --header-bg: rgba(4, 20, 8, 0.92);
+  --tile-shadow: rgba(0, 0, 0, 0.3);
+  --tile-shadow-hover: rgba(0, 0, 0, 0.5);
+  --stripe: rgba(255, 255, 255, 0.015);
+  --shimmer-from: #fbbf24;
+  --shimmer-mid: #fff7e6;
+  --shimmer-to: #f59e0b;
   color-scheme: dark;
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
-html {
-  scroll-behavior: smooth;
-}
+html { scroll-behavior: smooth; }
 
 body {
   margin: 0;
-  background: #020b06;
-  color: #f1f5f9;
+  background: var(--page-bg);
+  color: var(--tx1);
   font-family: 'Inter', sans-serif;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  transition: background 0.3s ease, color 0.3s ease;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #020b06; }
-::-webkit-scrollbar-thumb { background: #1a3d1f; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #2a5e30; }
+/* ── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--divider); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-soft); }
 
-/* Glass card */
+/* ── Glass card ─────────────────────────────────────────────── */
 .glass {
-  background: rgba(7, 31, 13, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255,255,255,0.06);
+  background: var(--card-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--card-border);
+  box-shadow: 0 2px 12px var(--tile-shadow);
+  transition: box-shadow 0.25s ease, transform 0.25s ease, border-color 0.25s ease;
 }
 
-/* Shimmer text */
+/* ── Shimmer text ───────────────────────────────────────────── */
 .shimmer-text {
-  background: linear-gradient(90deg, #fbbf24 0%, #fff7e6 40%, #fbbf24 60%, #f59e0b 100%);
+  background: linear-gradient(
+    90deg,
+    var(--shimmer-from) 0%,
+    var(--shimmer-mid) 40%,
+    var(--shimmer-from) 60%,
+    var(--shimmer-to) 100%
+  );
   background-size: 200% auto;
   -webkit-background-clip: text;
   background-clip: text;
@@ -48,75 +97,52 @@ body {
   animation: shimmer 3s linear infinite;
 }
 
-@keyframes shimmer {
-  to { background-position: 200% center; }
+/* Force gold shimmer on winner tiles regardless of theme */
+.winner-shimmer {
+  background: linear-gradient(90deg, #fbbf24 0%, #fff7e6 40%, #fbbf24 60%, #f59e0b 100%) !important;
+  background-size: 200% auto !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  animation: shimmer 3s linear infinite !important;
 }
 
-/* Pitch texture overlay */
+@keyframes shimmer { to { background-position: 200% center; } }
+
+/* ── Pitch texture ──────────────────────────────────────────── */
 .pitch-lines {
-  background-image:
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 60px,
-      rgba(255,255,255,0.015) 60px,
-      rgba(255,255,255,0.015) 61px
-    );
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 60px,
+    var(--stripe) 60px,
+    var(--stripe) 61px
+  );
 }
 
-/* Glow effects */
+/* ── Tile hover ─────────────────────────────────────────────── */
+.tile-hover:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 30px var(--tile-shadow-hover);
+  border-color: var(--accent-soft);
+}
+
+/* ── Glow effects ───────────────────────────────────────────── */
 .glow-gold {
-  box-shadow: 0 0 30px rgba(251,191,36,0.4), 0 0 60px rgba(251,191,36,0.15);
+  box-shadow: 0 0 30px rgba(251, 191, 36, 0.4), 0 0 60px rgba(251, 191, 36, 0.15) !important;
 }
 
-.glow-green {
-  box-shadow: 0 0 20px rgba(34,197,94,0.3);
-}
-
-/* Medal ranks */
+/* ── Medal ranks ────────────────────────────────────────────── */
 .rank-1 { background: linear-gradient(135deg, #ffd700, #ffaa00); }
 .rank-2 { background: linear-gradient(135deg, #c0c0c0, #a0a0a0); }
 .rank-3 { background: linear-gradient(135deg, #cd7f32, #a0522d); }
 
-/* Card chip */
-.yellow-card {
-  background: #fbbf24;
-  border-radius: 3px;
-  width: 12px;
-  height: 16px;
-  display: inline-block;
-}
-.red-card {
-  background: #ef4444;
-  border-radius: 3px;
-  width: 12px;
-  height: 16px;
-  display: inline-block;
-}
-
-/* Tile hover */
-.tile-hover {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-.tile-hover:hover {
-  transform: translateY(-2px);
-}
-
-/* Winner confetti effect */
-@keyframes confettiFall {
-  0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
-  100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
-}
-
-.confetti-piece {
-  animation: confettiFall 3s ease-in infinite;
-}
-
-/* Pulse ring */
+/* ── Pulse ring ─────────────────────────────────────────────── */
 @keyframes pulseRing {
   0% { transform: scale(0.8); opacity: 0.8; }
   100% { transform: scale(1.6); opacity: 0; }
 }
-.pulse-ring {
-  animation: pulseRing 1.5s ease-out infinite;
-}
+.pulse-ring { animation: pulseRing 1.5s ease-out infinite; }
+
+/* ── Theme transition ───────────────────────────────────────── */
+.glass, header, button { transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease, box-shadow 0.25s ease; }

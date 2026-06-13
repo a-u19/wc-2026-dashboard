@@ -3,11 +3,10 @@ import TeamRow from './TeamRow'
 
 export default function LeastGoalsTile({ data = [] }) {
   const top3 = data.slice(0, 3)
-
   return (
     <TileShell title="Fewest Goals Scored" icon="🔒⚽">
       {top3.length === 0 ? (
-        <p className="text-white/30 text-sm text-center py-4">No matches played yet</p>
+        <p className="text-tx-3 text-sm text-center py-4">No matches played yet</p>
       ) : (
         top3.map((t, i) => (
           <TeamRow
