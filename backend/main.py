@@ -79,12 +79,11 @@ async def get_token() -> str:
         payload = r.json()
         print(f"[AUTH] token payload keys: {list(payload.keys())}")
 
-        # API may use any of these field names
         tok = (payload.get("token")
                or payload.get("access_token")
                or payload.get("jwt")
                or payload.get("accessToken")
-               or payload.get("data", {}).get("token") if isinstance(payload.get("data"), dict) else None)
+               or (payload.get("data") or {}).get("token"))
 
         if not tok:
             raise HTTPException(500, f"No token found in auth response: {payload}")
