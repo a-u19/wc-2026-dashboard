@@ -61,8 +61,8 @@ export default function App() {
 
   const toggleTheme = () => setTheme(t => t === 'light' ? 'dark' : 'light')
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
+  const fetchAll = useCallback(async (showSpinner = false) => {
+    if (showSpinner) setLoading(true)
     try {
       const [mRes, sRes] = await Promise.all([
         fetch(`${API}/api/matches`),
@@ -78,13 +78,13 @@ export default function App() {
     } catch (e) {
       setError(e.message)
     } finally {
-      setLoading(false)
+      if (showSpinner) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    fetchAll()
-    const id = setInterval(fetchAll, REFRESH_MS)
+    fetchAll(true)  // show spinner only on first load
+    const id = setInterval(() => fetchAll(false), REFRESH_MS)
     return () => clearInterval(id)
   }, [fetchAll])
 
@@ -97,7 +97,7 @@ export default function App() {
       <div className="relative z-10">
         <Header
           lastUpdated={lastUpdated}
-          onRefresh={fetchAll}
+          onRefresh={() => fetchAll(true)}
           loading={loading}
           theme={theme}
           onToggleTheme={toggleTheme}

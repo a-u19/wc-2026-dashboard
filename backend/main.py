@@ -24,6 +24,16 @@ app = FastAPI(title="World Cup 2026 API")
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(cards_fetcher.background_loop())
+    asyncio.create_task(_prewarm_cache())
+
+async def _prewarm_cache():
+    """Fetch match + team data on startup so first page load is instant."""
+    try:
+        await load_teams()
+        await load_games()
+        print("[STARTUP] Cache pre-warmed.")
+    except Exception as e:
+        print(f"[STARTUP] Pre-warm failed: {e}")
 
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"])
