@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { format, parseISO } from 'date-fns'
 import TileShell from './TileShell'
@@ -24,13 +25,20 @@ const TEXT_COLOR = { 3: 'text-yellow-500 dark:text-yellow-400', 2: 'text-orange-
 
 export default function HatTrickTile({ winner, race = [] }) {
   const hasWinner = !!winner
+  const [expanded, setExpanded] = useState(new Set())
+
+  const toggle = (key) => setExpanded(prev => {
+    const next = new Set(prev)
+    next.has(key) ? next.delete(key) : next.add(key)
+    return next
+  })
 
   return (
     <TileShell title="Hat-Trick Race" icon="🎩" locked={hasWinner} winner={hasWinner}>
       {hasWinner && <Confetti />}
 
       <div className="relative z-10 space-y-3">
-        {/* Winner card — locked at top */}
+        {/* Winner — locked at top */}
         <AnimatePresence>
           {hasWinner && (
             <motion.div
@@ -73,22 +81,29 @@ export default function HatTrickTile({ winner, race = [] }) {
             )}
             <div className="space-y-2">
               {race.map((entry, i) => {
+                const rowKey = `${entry.player}-${entry.matchDate}-${entry.home}`
+                const isOpen = expanded.has(rowKey)
                 const tier = Math.min(entry.goals, 3)
                 const barWidth = Math.min(100, (entry.goals / 3) * 100)
                 const isHT = entry.goals >= 3
+                const hasMinutes = entry.minutes?.length > 0
+
                 return (
                   <motion.div
-                    key={`${entry.player}-${entry.matchDate}`}
+                    key={rowKey}
                     initial={{ opacity: 0, x: -12 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: i * 0.055 }}
-                    whileHover={{ x: 4 }}
-                    className={`rounded-lg p-2.5 border transition-all cursor-default
+                    className={`rounded-lg border transition-all overflow-hidden
                       ${isHT
                         ? 'bg-yellow-50 dark:bg-yellow-400/10 border-yellow-300 dark:border-yellow-400/30'
-                        : 'bg-[var(--card-hover)] border-[var(--card-border)] hover:border-[var(--accent-soft)]'}`}
+                        : 'bg-[var(--card-hover)] border-[var(--card-border)]'}`}
                   >
-                    <div className="flex items-center gap-2.5">
+                    {/* Row header — clickable if we have minute data */}
+                    <button
+                      onClick={() => hasMinutes && toggle(rowKey)}
+                      className={`w-full flex items-center gap-2.5 p-2.5 text-left ${hasMinutes ? 'cursor-pointer hover:bg-[var(--surface)]' : 'cursor-default'} transition-colors`}
+                    >
                       {entry.crest ? (
                         <motion.img
                           src={entry.crest} alt={entry.team}
@@ -98,6 +113,7 @@ export default function HatTrickTile({ winner, race = [] }) {
                       ) : (
                         <div className="w-7 h-7 rounded-full bg-surface flex-shrink-0" />
                       )}
+
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
                           <p className={`text-sm font-semibold truncate ${isHT ? 'text-yellow-600 dark:text-yellow-400' : 'text-tx-1'}`}>
@@ -116,16 +132,60 @@ export default function HatTrickTile({ winner, race = [] }) {
                           />
                         </div>
                       </div>
-                      <motion.div whileHover={{ scale: 1.1 }} className="flex-shrink-0 text-right">
-                        <span className={`font-display text-2xl ${TEXT_COLOR[tier]}`}>{entry.goals}</span>
-                        <p className="text-tx-3 text-xs">goal{entry.goals !== 1 ? 's' : ''}</p>
-                      </motion.div>
-                    </div>
+
+                      <div className="flex-shrink-0 flex flex-col items-end gap-1">
+                        <motion.div whileHover={{ scale: 1.1 }} className="text-right">
+                          <span className={`font-display text-2xl ${TEXT_COLOR[tier]}`}>{entry.goals}</span>
+                          <p className="text-tx-3 text-xs">goal{entry.goals !== 1 ? 's' : ''}</p>
+                        </motion.div>
+                        {hasMinutes && (
+                          <motion.span
+                            animate={{ rotate: isOpen ? 180 : 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="text-tx-3 text-xs block"
+                          >
+                            ▼
+                          </motion.span>
+                        )}
+                      </div>
+                    </button>
+
+                    {/* Expanded goal times */}
+                    <AnimatePresence>
+                      {isOpen && hasMinutes && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.22, ease: 'easeInOut' }}
+                          className="overflow-hidden"
+                        >
+                          <div className="px-3 pb-2.5 pt-2 border-t border-[var(--divider)]">
+                            <p className="text-tx-3 text-xs mb-1.5">Goal times</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {entry.minutes.map((min, j) => (
+                                <span
+                                  key={j}
+                                  className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full
+                                    ${isHT
+                                      ? 'bg-yellow-400/20 text-yellow-600 dark:text-yellow-400'
+                                      : 'bg-[var(--surface)] text-tx-2'}`}
+                                >
+                                  ⚽ {min}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </motion.div>
                 )
               })}
             </div>
-            <p className="text-tx-3 text-xs text-center pt-1">Bar shows progress toward a hat-trick (3 goals)</p>
+            <p className="text-tx-3 text-xs text-center pt-1">
+              Bar = progress to hat-trick · {race.some(e => e.minutes?.length > 0) ? 'Tap a row to see goal times' : ''}
+            </p>
           </>
         )}
       </div>

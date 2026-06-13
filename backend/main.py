@@ -159,37 +159,39 @@ def map_stage(game: dict) -> str:
     }.get((game.get("type") or "").lower(), game.get("type", ""))
 
 
-def parse_scorers(raw) -> list[str]:
+def parse_scorers(raw) -> list[tuple[str, str | None]]:
+    """Return list of (player_name, minute_str) tuples.
+
+    Handles MongoDB set notation: {"J. Quiñones 9'","F. Balogun 45'+"}.
+    Minute string includes + for extra time (e.g. "45'+"). Returns None if no minute found.
+    Own goals (OG) are excluded.
+    """
     if not raw or str(raw).strip().lower() in ("null", "none", ""):
         return []
 
     s = str(raw).strip()
-
-    # MongoDB set notation: {"Name1 ","Name1 +","Name2 "}
     if s.startswith("{"):
         s = s[1:-1] if s.endswith("}") else s[1:]
 
-    # Split on the boundary between quoted tokens: ","
-    # Falls back to plain comma split if no quotes present
-    if '"' in s:
-        parts = re.split(r'",\s*"', s)
-    else:
-        parts = s.split(",")
+    parts = re.split(r'",\s*"', s) if '"' in s else s.split(",")
 
-    names = []
+    result = []
     for part in parts:
-        name = part.strip().strip('"').strip("'")
-        # Skip own goals — they don't count toward a player's hat-trick
-        if re.search(r'\(OG\)', name, re.IGNORECASE):
+        token = part.strip().strip('"').strip("'").strip()
+        if not token or re.search(r'\(OG\)', token, re.IGNORECASE):
             continue
-        # Strip trailing repeat markers (+), minute annotations (45'), whitespace
-        name = re.sub(r"\s*\+\s*$", "", name)
-        name = re.sub(r"\s*\d+[''′]?\s*$", "", name)
-        name = name.strip()
+        # Minute is digits + optional '+' followed by ' at the end
+        m = re.search(r"\s+(\d+\+?)[''′]\s*$", token)
+        if m:
+            minute = m.group(1) + "'"
+            name = token[:m.start()].strip()
+        else:
+            minute = None
+            name = token.strip()
         if name:
-            names.append(name)
+            result.append((name, minute))
 
-    return names
+    return result
 
 
 def extract_list(data, *keys) -> list:
@@ -319,16 +321,18 @@ async def get_stats():
             (g.get("home_scorers"), home_name, home_crest),
             (g.get("away_scorers"), away_name, away_crest),
         ]:
-            names = parse_scorers(raw_scorers)
-            counts: dict[str, int] = defaultdict(int)
-            for n in names:
-                counts[n] += 1
-            for player_name, count in counts.items():
+            pairs = parse_scorers(raw_scorers)
+            player_minutes: dict[str, list] = defaultdict(list)
+            for pname, minute in pairs:
+                player_minutes[pname].append(minute)
+            for player_name, minutes in player_minutes.items():
+                count = len(minutes)
                 entry = {
                     "player":    player_name,
                     "team":      side_name,
                     "crest":     side_crest,
                     "goals":     count,
+                    "minutes":   [m for m in minutes if m],
                     "matchDate": match_date,
                     "home":      home_name,
                     "away":      away_name,

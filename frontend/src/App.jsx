@@ -8,9 +8,8 @@ import FastestGoalsTile from './components/FastestGoalsTile'
 import HatTrickTile from './components/HatTrickTile'
 import MostGoalsSingleGameTile from './components/MostGoalsSingleGameTile'
 import LoadingScreen from './components/LoadingScreen'
-import { fetchMatches, computeStats } from './utils/wcApi.js'
-
 const REFRESH_MS = 90_000
+const API = (typeof __API_BASE__ !== 'undefined' && __API_BASE__) ? __API_BASE__ : ''
 
 function ErrorBanner({ message }) {
   return (
@@ -65,9 +64,15 @@ export default function App() {
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const allMatches = await fetchMatches()
-      setMatches(allMatches)
-      setStats(computeStats(allMatches))
+      const [mRes, sRes] = await Promise.all([
+        fetch(`${API}/api/matches`),
+        fetch(`${API}/api/stats`),
+      ])
+      if (!mRes.ok) throw new Error(await mRes.text())
+      if (!sRes.ok) throw new Error(await sRes.text())
+      const [mData, sData] = await Promise.all([mRes.json(), sRes.json()])
+      setMatches(mData.matches || [])
+      setStats(sData)
       setError(null)
       setLastUpdated(new Date())
     } catch (e) {
