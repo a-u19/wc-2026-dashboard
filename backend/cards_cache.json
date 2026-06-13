@@ -1,0 +1,81 @@
+{
+  "events": {},
+  "cards": {
+    "760415": {
+      "eventId": "760415",
+      "home": "Mexico",
+      "away": "South Africa",
+      "teams": [
+        {
+          "name": "Mexico",
+          "crest": "https://a.espncdn.com/i/teamlogos/soccer/500/203.png",
+          "yellow": 1,
+          "red": 1
+        },
+        {
+          "name": "South Africa",
+          "crest": "https://a.espncdn.com/i/teamlogos/soccer/500/467.png",
+          "yellow": 2,
+          "red": 2
+        }
+      ]
+    },
+    "760414": {
+      "eventId": "760414",
+      "home": "South Korea",
+      "away": "Czechia",
+      "teams": [
+        {
+          "name": "South Korea",
+          "crest": "https://a.espncdn.com/i/teamlogos/soccer/500/451.png",
+          "yellow": 1,
+          "red": 0
+        },
+        {
+          "name": "Czechia",
+          "crest": "https://a.espncdn.com/i/teamlogos/soccer/500/450.png",
+          "yellow": 0,
+          "red": 0
+        }
+      ]
+    },
+    "760416": {
+      "eventId": "760416",
+      "home": "Canada",
+      "away": "Bosnia-Herzegovina",
+      "teams": [
+        {
+          "name": "Canada",
+          "crest": "https://a.espncdn.com/i/teamlogos/soccer/500/206.png",
+          "yellow": 2,
+          "red": 0
+        },
+        {
+          "name": "Bosnia-Herzegovina",
+          "crest": "https://a.espncdn.com/i/teamlogos/soccer/500/452.png",
+          "yellow": 3,
+          "red": 0
+        }
+      ]
+    },
+    "760417": {
+      "eventId": "760417",
+      "home": "United States",
+      "away": "Paraguay",
+      "teams": [
+        {
+          "name": "United States",
+          "crest": "https://a.espncdn.com/i/teamlogos/soccer/500/660.png",
+          "yellow": 1,
+          "red": 0
+        },
+        {
+          "name": "Paraguay",
+          "crest": "https://a.espncdn.com/i/teamlogos/soccer/500/210.png",
+          "yellow": 5,
+          "red": 0
+        }
+      ]
+    }
+  }
+}

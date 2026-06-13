@@ -5,10 +5,12 @@ import time
 import traceback
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 import httpx
 from dotenv import load_dotenv
 
@@ -459,3 +461,16 @@ async def debug():
 @app.get("/api/health")
 async def health():
     return {"ok": True, "source": "worldcup26.ir"}
+
+
+# ── Serve React frontend (must be last) ───────────────────────────────────────
+_dist = Path(__file__).parent.parent / "frontend" / "dist"
+if _dist.exists():
+    app.mount("/assets", StaticFiles(directory=str(_dist / "assets")), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        file = _dist / full_path
+        if file.exists() and file.is_file():
+            return FileResponse(str(file))
+        return FileResponse(str(_dist / "index.html"))
