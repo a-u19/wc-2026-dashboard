@@ -286,40 +286,26 @@ export default function MatchesTile({ matches = [] }) {
           (m.awayTeam?.shortName || m.awayTeam?.name) === selectedTeam
         )
 
+  const matchSortKey = m => {
+    const b = getBroadcast(m)
+    if (b) return `${b.date}T${b.kickoffBst}`
+    return m.utcDate || ''
+  }
+
   const { upcoming, past, live } = useMemo(() => {
     const live     = matches.filter(m => m.status === 'IN_PLAY' || m.status === 'PAUSED')
-    const upcoming = matches.filter(m => m.status === 'SCHEDULED' || m.status === 'TIMED')
+    const upcoming = matches
+      .filter(m => m.status === 'SCHEDULED' || m.status === 'TIMED')
+      .sort((a, b) => matchSortKey(a).localeCompare(matchSortKey(b)))
     const past     = matches.filter(m => m.status === 'FINISHED').reverse()
     return { live, upcoming, past }
   }, [matches])
 
-  const displayed = filterByTeam(tab === 'upcoming' ? upcoming : past)
+  // Live matches appear at the top of the upcoming tab
+  const displayed = filterByTeam(tab === 'upcoming' ? [...live, ...upcoming] : past)
 
   return (
     <TileShell title="Matches" icon="⚽">
-      {/* Live banner */}
-      <AnimatePresence>
-        {live.length > 0 && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden mb-3"
-          >
-            <div className="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl p-2 flex items-center gap-2 mb-2">
-              <span className="relative flex h-3 w-3">
-                <span className="pulse-ring absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500" />
-              </span>
-              <span className="text-red-600 dark:text-red-400 text-xs font-bold">
-                {live.length} MATCH{live.length > 1 ? 'ES' : ''} LIVE NOW
-              </span>
-            </div>
-            {live.map((m, i) => <MatchCard key={m.id} m={m} index={i} />)}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Controls: tabs + combobox */}
       <div className="flex flex-col sm:flex-row gap-2 mb-3">
         <div className="flex gap-1.5 flex-1">
@@ -332,9 +318,17 @@ export default function MatchesTile({ matches = [] }) {
                   ? 'bg-green-600 text-white shadow-sm'
                   : 'bg-surface text-tx-2 hover:text-tx-1 hover:bg-[var(--card-hover)]'}`}
             >
-              {t === 'upcoming'
-                ? `Upcoming (${filterByTeam(upcoming).length})`
-                : `Results (${filterByTeam(past).length})`}
+              {t === 'upcoming' ? (
+                <span className="flex items-center justify-center gap-1.5">
+                  {live.length > 0 && (
+                    <span className="relative flex h-2 w-2">
+                      <span className="pulse-ring absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+                    </span>
+                  )}
+                  Upcoming ({filterByTeam([...live, ...upcoming]).length})
+                </span>
+              ) : `Results (${filterByTeam(past).length})`}
             </button>
           ))}
         </div>
