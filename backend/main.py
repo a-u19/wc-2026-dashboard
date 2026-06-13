@@ -178,8 +178,14 @@ def parse_scorers(raw) -> list[tuple[str, str | None]]:
         return []
 
     s = str(raw).strip()
+    # Strip outer delimiters: {…} or Unicode curly-quote wrappers “…”
     if s.startswith("{"):
         s = s[1:-1] if s.endswith("}") else s[1:]
+    elif s.startswith("“") and s.endswith("”"):
+        s = s[1:-1]
+
+    # Normalise Unicode curly quotes to ASCII so splitting works uniformly
+    s = s.replace("“", '"').replace("”", '"')
 
     parts = re.split(r'",\s*"', s) if '"' in s else s.split(",")
 
@@ -405,23 +411,12 @@ async def get_stats():
 
 @app.get("/api/cards/status")
 async def cards_status():
-    cache = cards_fetcher._load()
-    fixtures   = cache.get("fixtures", {})
-    statistics = cache.get("statistics", {})
-    finished   = [f for f in fixtures.values() if f.get("status") in ("FT", "AET", "PEN")]
-    pending    = [f for f in finished if str(f["id"]) not in statistics]
-    api_key    = os.getenv("APIFOOTBALL_KEY", "")
+    cache  = cards_fetcher._load()
+    cards  = cache.get("cards", {})
     return {
-        "api_key_set":        bool(api_key),
-        "api_key_prefix":     api_key[:6] + "…" if api_key else None,
-        "fixtures_cached":    len(fixtures),
-        "finished_matches":   len(finished),
-        "statistics_cached":  len(statistics),
-        "pending_matches":    len(pending),
-        "daily_used":        cards_fetcher._daily_count,
-        "daily_limit":       cards_fetcher.DAILY_LIMIT,
-        "in_fetch_window":   cards_fetcher._in_window(),
-        "cards_by_team":     cards_fetcher.get_cards_by_team(cache)[:5],
+        "matches_cached":  len(cards),
+        "source":          "ESPN (no API key required)",
+        "cards_by_team":   cards_fetcher.get_cards_by_team(cache)[:10],
     }
 
 
@@ -429,9 +424,9 @@ async def cards_status():
 
 @app.post("/api/cards/fetch")
 async def cards_fetch_now():
-    """Manually trigger one fetch cycle (ignores time window, respects daily limit)."""
+    """Fetch all pending card data immediately, bypassing daily limit and time window."""
     try:
-        await cards_fetcher._fetch_cycle()
+        await cards_fetcher.fetch_all_now()
         return {"ok": True, "daily_used": cards_fetcher._daily_count}
     except Exception as e:
         return {"ok": False, "error": str(e)}

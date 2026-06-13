@@ -1,28 +1,28 @@
 """
-Fetches card (yellow/red) data from API-Football during the 20:00–08:00 BST window.
-Makes at most 20 requests per cycle, spread every 36 minutes across the window.
-Results are cached in cards_cache.json indefinitely (finished matches don't change).
+Scrapes yellow/red card data from ESPN's unofficial sports API — no key required.
+Scheduled at 22:00, 00:00, 02:00, 04:00, 06:00, 08:00 BST.
+Results cached permanently in cards_cache.json (finished matches never change).
+
+ESPN endpoints used:
+  /scoreboard?dates=YYYYMMDD  → event IDs for each date
+  /summary?event=ID           → boxscore with yellowCards / redCards per team
 """
 
 import asyncio
 import json
-import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from pathlib import Path
 
 import httpx
 
-CACHE_FILE    = Path(__file__).parent / "cards_cache.json"
-API_BASE      = "https://v3.football.api-sports.io"
-WC_LEAGUE_ID  = 1       # FIFA World Cup on API-Football
-WC_SEASON     = 2026
-BST           = timezone(timedelta(hours=1))
-DAILY_LIMIT    = 90   # stay comfortably under API-Football's 100 req/day free tier
-# Scheduled fetch times in BST (hour, minute)
-SCHEDULE_BST   = [(22, 0), (0, 0), (2, 0), (4, 0), (6, 0), (8, 0)]
+CACHE_FILE   = Path(__file__).parent / "cards_cache.json"
+ESPN_BASE    = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world"
+BST          = timezone(timedelta(hours=1))
+SCHEDULE_BST = [(22, 0), (0, 0), (2, 0), (4, 0), (6, 0), (8, 0)]
 
-_daily_count   = 0
-_daily_date    = None
+# WC2026 runs Jun 11 – Jul 19 2026
+WC_START = date(2026, 6, 11)
+WC_END   = date(2026, 7, 19)
 
 
 def _load() -> dict:
@@ -31,7 +31,7 @@ def _load() -> dict:
             return json.loads(CACHE_FILE.read_text(encoding="utf-8"))
         except Exception:
             pass
-    return {"fixtures": {}, "events": {}}
+    return {"events": {}, "cards": {}}
 
 
 def _save(cache: dict):
@@ -39,142 +39,144 @@ def _save(cache: dict):
 
 
 def _seconds_until_next_scheduled() -> float:
-    """Returns seconds until the next scheduled fetch time."""
-    now = datetime.now(BST)
-    today = now.date()
+    now      = datetime.now(BST)
+    today    = now.date()
     tomorrow = today + timedelta(days=1)
-
     candidates = []
     for h, m in SCHEDULE_BST:
         for d in (today, tomorrow):
             dt = datetime(d.year, d.month, d.day, h, m, tzinfo=BST)
             if dt > now:
                 candidates.append(dt)
-
     candidates.sort()
     return (candidates[0] - now).total_seconds()
 
 
 def get_cards_by_team(cache: dict | None = None) -> list[dict]:
-    """Aggregate cached fixture statistics into a per-team sorted card list."""
+    """Aggregate cached card data into a per-team sorted list."""
     if cache is None:
         cache = _load()
-
     teams: dict[str, dict] = {}
-    for team_stats_list in cache.get("statistics", {}).values():
-        # Each entry is the response array: [{team, statistics}, {team, statistics}]
-        for entry in team_stats_list:
-            team_name = (entry.get("team") or {}).get("name", "")
-            crest     = (entry.get("team") or {}).get("logo", "")
-            if not team_name:
+    for entry in cache.get("cards", {}).values():
+        for side in entry.get("teams", []):
+            name   = side.get("name", "")
+            crest  = side.get("crest", "")
+            yellow = side.get("yellow", 0)
+            red    = side.get("red", 0)
+            if not name:
                 continue
-            stats = {s["type"]: (s["value"] or 0) for s in entry.get("statistics", [])}
-            yellow = int(stats.get("Yellow Cards") or 0)
-            red    = int(stats.get("Red Cards") or 0)
-            if team_name not in teams:
-                teams[team_name] = {"name": team_name, "crest": crest, "yellow": 0, "red": 0, "total": 0}
-            teams[team_name]["yellow"] += yellow
-            teams[team_name]["red"]    += red
-            teams[team_name]["total"]  += yellow + red
-
-    # Most cards first; tiebreak by most red cards
+            if name not in teams:
+                teams[name] = {"name": name, "crest": crest, "yellow": 0, "red": 0, "total": 0}
+            teams[name]["yellow"] += yellow
+            teams[name]["red"]    += red
+            teams[name]["total"]  += yellow + red
     return sorted(teams.values(), key=lambda t: (-t["total"], -t["red"]))
 
 
-def _check_and_increment_daily() -> bool:
-    """Returns True if we're under the daily limit and increments the counter."""
-    global _daily_count, _daily_date
-    today = datetime.now(timezone.utc).date()
-    if _daily_date != today:
-        _daily_count = 0
-        _daily_date  = today
-    if _daily_count >= DAILY_LIMIT:
-        return False
-    _daily_count += 1
-    return True
+async def _fetch_event_ids(client: httpx.AsyncClient, day: date) -> list[str]:
+    """Get ESPN event IDs for a given date."""
+    r = await client.get(f"{ESPN_BASE}/scoreboard", params={"dates": day.strftime("%Y%m%d")})
+    if r.status_code != 200:
+        return []
+    ids = []
+    for event in r.json().get("events", []):
+        status = event.get("status", {}).get("type", {}).get("name", "")
+        if status == "STATUS_FULL_TIME":
+            ids.append(str(event["id"]))
+    return ids
 
 
-async def _fetch_cycle():
-    api_key = os.getenv("APIFOOTBALL_KEY", "").strip()
-    if not api_key:
-        return
+async def _fetch_cards_for_event(client: httpx.AsyncClient, event_id: str) -> dict | None:
+    """Fetch yellow/red card counts per team for one completed match."""
+    r = await client.get(f"{ESPN_BASE}/summary", params={"event": event_id})
+    if r.status_code != 200:
+        return None
+    data = r.json()
+    bs_teams = data.get("boxscore", {}).get("teams", [])
+    if not bs_teams:
+        return None
 
-    if not _check_and_increment_daily():
-        print(f"[CARDS] Daily limit of {DAILY_LIMIT} reached, skipping.")
-        return
+    teams_out = []
+    for t in bs_teams:
+        team_info = t.get("team", {})
+        stats     = {s["name"]: s.get("displayValue", "0") for s in t.get("statistics", [])}
+        teams_out.append({
+            "name":   team_info.get("displayName", ""),
+            "crest":  f"https://a.espncdn.com/i/teamlogos/soccer/500/{team_info.get('id','')}.png",
+            "yellow": int(stats.get("yellowCards", 0) or 0),
+            "red":    int(stats.get("redCards", 0) or 0),
+        })
 
+    # Pull match name from header
+    header_comp = (data.get("header", {}).get("competitions") or [{}])[0]
+    competitors = header_comp.get("competitors", [])
+    home = next((c for c in competitors if c.get("homeAway") == "home"), {})
+    away = next((c for c in competitors if c.get("homeAway") == "away"), {})
+
+    return {
+        "eventId": event_id,
+        "home":    (home.get("team") or {}).get("displayName", ""),
+        "away":    (away.get("team") or {}).get("displayName", ""),
+        "teams":   teams_out,
+    }
+
+
+async def _do_fetch(bypass_schedule: bool = False):
+    """Scan all WC2026 match dates, fetch card data for any completed uncached matches."""
     cache = _load()
+    already_cached = set(cache.get("cards", {}).keys())
 
-    async with httpx.AsyncClient(
-        base_url=API_BASE,
-        headers={"x-apisports-key": api_key},
-        timeout=15,
-    ) as client:
+    async with httpx.AsyncClient(timeout=15) as client:
+        # Walk every WC match date and collect completed event IDs
+        today_bst = datetime.now(BST).date()
+        check_end = min(today_bst, WC_END)
+        current   = WC_START
+        all_event_ids: list[str] = []
 
-        # ── Priority 1: get fixture list if we don't have it yet ──
-        if not cache.get("fixtures"):
-            print("[CARDS] Fetching WC2026 fixture list from API-Football…")
-            r = await client.get("/fixtures", params={"league": WC_LEAGUE_ID, "season": WC_SEASON})
-            if r.status_code == 200:
-                for f in r.json().get("response", []):
-                    fid = str(f["fixture"]["id"])
-                    cache["fixtures"][fid] = {
-                        "id":     fid,
-                        "date":   f["fixture"]["date"],
-                        "home":   f["teams"]["home"]["name"],
-                        "away":   f["teams"]["away"]["name"],
-                        "status": f["fixture"]["status"]["short"],
-                    }
+        while current <= check_end:
+            ids = await _fetch_event_ids(client, current)
+            all_event_ids.extend(ids)
+            current += timedelta(days=1)
+
+        pending = [eid for eid in all_event_ids if eid not in already_cached]
+        print(f"[CARDS] {len(all_event_ids)} completed matches found, {len(pending)} uncached.")
+
+        for eid in pending:
+            result = await _fetch_cards_for_event(client, eid)
+            if result:
+                cache.setdefault("cards", {})[eid] = result
                 _save(cache)
-                print(f"[CARDS] Cached {len(cache['fixtures'])} WC2026 fixtures.")
+                y = sum(t["yellow"] for t in result["teams"])
+                r = sum(t["red"]    for t in result["teams"])
+                print(f"[CARDS] {result['home']} vs {result['away']}: {y}Y {r}R cached.")
             else:
-                print(f"[CARDS] Fixture list failed {r.status_code}: {r.text[:200]}")
-            return  # one request per cycle
+                print(f"[CARDS] No card data for event {eid}.")
 
-        # ── Priority 2: fetch statistics for ALL uncached finished fixtures ──
-        pending = [
-            f for f in cache.get("fixtures", {}).values()
-            if f.get("status") in ("FT", "AET", "PEN")
-            and str(f["id"]) not in cache.get("statistics", {})
-        ]
+    print(f"[CARDS] Done. {len(cache.get('cards', {}))} matches in cache.")
 
-        if not pending:
-            print(f"[CARDS] All finished fixtures already cached. Daily: {_daily_count}/{DAILY_LIMIT}")
-            return
 
-        print(f"[CARDS] {len(pending)} fixtures need statistics.")
-        for fix in pending:
-            if not _check_and_increment_daily():
-                print(f"[CARDS] Daily limit hit, stopping. {len(pending)} fixture(s) deferred.")
-                break
-            fid = str(fix["id"])
-            r = await client.get("/fixtures/statistics", params={"fixture": fid})
-            if r.status_code == 200:
-                cache.setdefault("statistics", {})[fid] = r.json().get("response", [])
-                _save(cache)
-                print(f"[CARDS] {fix['home']} vs {fix['away']} done. Daily: {_daily_count}/{DAILY_LIMIT}")
-            else:
-                print(f"[CARDS] Statistics failed for fixture {fid}: {r.status_code}")
+async def fetch_all_now():
+    """Bypass schedule — fetch everything immediately. For testing/manual use."""
+    print("[CARDS] Running full fetch (schedule bypassed)…")
+    await _do_fetch(bypass_schedule=True)
 
 
 async def background_loop():
-    """Fetches card data at 22:00, 00:00, 02:00, 04:00, 06:00, 08:00 BST.
-    Also runs once on startup to populate the fixture list."""
-    print("[CARDS] Background fetcher started.")
+    print("[CARDS] ESPN card scraper started (schedule: 22:00, 00:00, 02:00, 04:00, 06:00, 08:00 BST).")
     await asyncio.sleep(10)
 
-    # Startup: fetch fixture list (and any pending events) immediately
+    # Always attempt one fetch on startup
     try:
-        await _fetch_cycle()
+        await _do_fetch()
     except Exception as e:
         print(f"[CARDS] Startup fetch error: {e}")
 
     while True:
-        secs = _seconds_until_next_scheduled()
+        secs    = _seconds_until_next_scheduled()
         next_dt = datetime.now(BST) + timedelta(seconds=secs)
-        print(f"[CARDS] Next fetch at {next_dt.strftime('%H:%M BST')} (in {int(secs//60)}m)")
+        print(f"[CARDS] Next fetch at {next_dt.strftime('%H:%M BST')} (in {int(secs // 60)}m)")
         await asyncio.sleep(secs)
         try:
-            await _fetch_cycle()
+            await _do_fetch()
         except Exception as e:
             print(f"[CARDS] Fetch cycle error: {e}")
