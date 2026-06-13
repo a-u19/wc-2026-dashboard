@@ -56,29 +56,28 @@ def _seconds_until_next_scheduled() -> float:
 
 
 def get_cards_by_team(cache: dict | None = None) -> list[dict]:
-    """Aggregate cached card events into a per-team sorted list."""
+    """Aggregate cached fixture statistics into a per-team sorted card list."""
     if cache is None:
         cache = _load()
 
     teams: dict[str, dict] = {}
-    for events in cache.get("events", {}).values():
-        for ev in events:
-            if ev.get("type") != "Card":
-                continue
-            team_name = (ev.get("team") or {}).get("name", "")
+    for team_stats_list in cache.get("statistics", {}).values():
+        # Each entry is the response array: [{team, statistics}, {team, statistics}]
+        for entry in team_stats_list:
+            team_name = (entry.get("team") or {}).get("name", "")
+            crest     = (entry.get("team") or {}).get("logo", "")
             if not team_name:
                 continue
-            detail = ev.get("detail", "")
+            stats = {s["type"]: (s["value"] or 0) for s in entry.get("statistics", [])}
+            yellow = int(stats.get("Yellow Cards") or 0)
+            red    = int(stats.get("Red Cards") or 0)
             if team_name not in teams:
-                teams[team_name] = {"name": team_name, "yellow": 0, "red": 0, "total": 0}
-            if "Yellow" in detail:
-                teams[team_name]["yellow"] += 1
-                teams[team_name]["total"]  += 1
-            elif "Red" in detail:
-                teams[team_name]["red"]   += 1
-                teams[team_name]["total"] += 1
+                teams[team_name] = {"name": team_name, "crest": crest, "yellow": 0, "red": 0, "total": 0}
+            teams[team_name]["yellow"] += yellow
+            teams[team_name]["red"]    += red
+            teams[team_name]["total"]  += yellow + red
 
-    # Sort: most total cards → most red cards as tiebreak
+    # Most cards first; tiebreak by most red cards
     return sorted(teams.values(), key=lambda t: (-t["total"], -t["red"]))
 
 
@@ -132,30 +131,30 @@ async def _fetch_cycle():
                 print(f"[CARDS] Fixture list failed {r.status_code}: {r.text[:200]}")
             return  # one request per cycle
 
-        # ── Priority 2: fetch events for ALL uncached finished fixtures ──
+        # ── Priority 2: fetch statistics for ALL uncached finished fixtures ──
         pending = [
             f for f in cache.get("fixtures", {}).values()
             if f.get("status") in ("FT", "AET", "PEN")
-            and str(f["id"]) not in cache.get("events", {})
+            and str(f["id"]) not in cache.get("statistics", {})
         ]
 
         if not pending:
             print(f"[CARDS] All finished fixtures already cached. Daily: {_daily_count}/{DAILY_LIMIT}")
             return
 
-        print(f"[CARDS] {len(pending)} fixtures need event data.")
+        print(f"[CARDS] {len(pending)} fixtures need statistics.")
         for fix in pending:
             if not _check_and_increment_daily():
                 print(f"[CARDS] Daily limit hit, stopping. {len(pending)} fixture(s) deferred.")
                 break
             fid = str(fix["id"])
-            r = await client.get("/fixtures/events", params={"fixture": fid, "type": "Card"})
+            r = await client.get("/fixtures/statistics", params={"fixture": fid})
             if r.status_code == 200:
-                cache.setdefault("events", {})[fid] = r.json().get("response", [])
+                cache.setdefault("statistics", {})[fid] = r.json().get("response", [])
                 _save(cache)
                 print(f"[CARDS] {fix['home']} vs {fix['away']} done. Daily: {_daily_count}/{DAILY_LIMIT}")
             else:
-                print(f"[CARDS] Events failed for fixture {fid}: {r.status_code}")
+                print(f"[CARDS] Statistics failed for fixture {fid}: {r.status_code}")
 
 
 async def background_loop():

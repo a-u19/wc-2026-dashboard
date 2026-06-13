@@ -406,18 +406,18 @@ async def get_stats():
 @app.get("/api/cards/status")
 async def cards_status():
     cache = cards_fetcher._load()
-    fixtures  = cache.get("fixtures", {})
-    events    = cache.get("events", {})
-    finished  = [f for f in fixtures.values() if f.get("status") in ("FT", "AET", "PEN")]
-    pending   = [f for f in finished if str(f["id"]) not in events]
-    api_key   = os.getenv("APIFOOTBALL_KEY", "")
+    fixtures   = cache.get("fixtures", {})
+    statistics = cache.get("statistics", {})
+    finished   = [f for f in fixtures.values() if f.get("status") in ("FT", "AET", "PEN")]
+    pending    = [f for f in finished if str(f["id"]) not in statistics]
+    api_key    = os.getenv("APIFOOTBALL_KEY", "")
     return {
-        "api_key_set":       bool(api_key),
-        "api_key_prefix":    api_key[:6] + "…" if api_key else None,
-        "fixtures_cached":   len(fixtures),
-        "finished_matches":  len(finished),
-        "events_cached":     len(events),
-        "pending_matches":   len(pending),
+        "api_key_set":        bool(api_key),
+        "api_key_prefix":     api_key[:6] + "…" if api_key else None,
+        "fixtures_cached":    len(fixtures),
+        "finished_matches":   len(finished),
+        "statistics_cached":  len(statistics),
+        "pending_matches":    len(pending),
         "daily_used":        cards_fetcher._daily_count,
         "daily_limit":       cards_fetcher.DAILY_LIMIT,
         "in_fetch_window":   cards_fetcher._in_window(),
