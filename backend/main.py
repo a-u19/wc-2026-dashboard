@@ -177,13 +177,13 @@ def parse_scorers(raw) -> list[tuple[str, str | None]]:
 
     result = []
     for part in parts:
-        token = part.strip().strip('"').strip("'").strip()
+        token = part.strip().strip('"').strip()
         if not token or re.search(r'\(OG\)', token, re.IGNORECASE):
             continue
-        # Minute is digits + optional '+' followed by ' at the end
-        m = re.search(r"\s+(\d+\+?)[''′]\s*$", token)
+        # Minute formats: "9'" simple, "45'+5" stoppage time (apostrophe comes before +N)
+        m = re.search(r"\s+(\d+'(?:\+\d+)?)\s*$", token)
         if m:
-            minute = m.group(1) + "'"
+            minute = m.group(1)
             name = token[:m.start()].strip()
         else:
             minute = None
