@@ -8,19 +8,21 @@ import broadcastSchedule from '../data/broadcastSchedule.json'
 const ALIASES = {
   'united states': 'usa',
   'us': 'usa',
-  "côte d'ivoire": 'ivory coast',
-  'cote divoire': 'ivory coast',
+  "cote d ivoire": 'ivory coast',
   'republic of ireland': 'ireland',
   'democratic republic of congo': 'dr congo',
+  'democratic republic of the congo': 'dr congo',
   'congo dr': 'dr congo',
   'bosnia & herzegovina': 'bosnia-herzegovina',
   'bosnia and herzegovina': 'bosnia-herzegovina',
-  'curaçao': 'curacao',
   'czechia': 'czech republic',
 }
 function normTeam(t) {
   if (!t) return ''
-  const s = t.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+  // Strip diacritics (ç→c, é→e, etc.) before removing non-alphanum
+  const s = t.toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
   return ALIASES[s] ?? s
 }
 
