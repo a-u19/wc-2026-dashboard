@@ -1,8 +1,13 @@
 import os
-import asyncio
+import re
+import time
+import traceback
 from collections import defaultdict
-from fastapi import FastAPI, HTTPException
+from datetime import datetime, timezone
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import httpx
 from dotenv import load_dotenv
 
@@ -11,202 +16,353 @@ load_dotenv()
 app = FastAPI(title="World Cup 2026 API")
 
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
-API_KEY = os.getenv("FOOTBALL_API_KEY", "")
-BASE_URL = "https://api.football-data.org/v4"
-COMPETITION = "WC"
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    tb = traceback.format_exc()
+    print(f"\n[ERROR] {request.url}\n{tb}")
+    return JSONResponse(status_code=500, content={"detail": str(exc), "traceback": tb})
 
-HEADERS = {"X-Auth-Token": API_KEY}
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+BASE        = "https://worldcup26.ir"
+WC_EMAIL    = os.getenv("WC_EMAIL",    "wcdash2026x@gmail.com")
+WC_PASSWORD = os.getenv("WC_PASSWORD", "Dashboard2026!")
+WC_NAME     = os.getenv("WC_NAME",     "WC Dashboard")
+
+_token: str | None = None
+_token_ts: float   = 0
+TOKEN_TTL  = 7_000_000  # ~81 days
 
 _cache: dict = {}
-CACHE_TTL = 120  # seconds
+CACHE_TTL   = 90
 
-import time
 
-async def fetch(path: str) -> dict:
-    url = f"{BASE_URL}{path}"
+async def get_token() -> str:
+    global _token, _token_ts
+    if _token and (time.time() - _token_ts) < TOKEN_TTL:
+        return _token
+
+    print(f"[AUTH] Authenticating with {WC_EMAIL}…")
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.post(f"{BASE}/auth/authenticate",
+                         json={"email": WC_EMAIL, "password": WC_PASSWORD})
+        print(f"[AUTH] authenticate → {r.status_code}: {r.text[:300]}")
+
+        if r.status_code not in (200, 201):
+            print(f"[AUTH] Login failed, attempting registration…")
+            reg = await c.post(f"{BASE}/auth/register",
+                               json={"email": WC_EMAIL, "password": WC_PASSWORD, "name": WC_NAME})
+            print(f"[AUTH] register → {reg.status_code}: {reg.text[:300]}")
+            # 409 = already registered — fine
+            if reg.status_code in (200, 201):
+                # Register returns the token directly — use it immediately
+                reg_payload = reg.json()
+                tok = reg_payload.get("token")
+                if tok:
+                    _token = tok
+                    _token_ts = time.time()
+                    print("[AUTH] Registered and token acquired from register response ✓")
+                    return _token
+            elif reg.status_code != 409:
+                raise HTTPException(500, f"Registration failed {reg.status_code}: {reg.text[:200]}")
+
+            r = await c.post(f"{BASE}/auth/authenticate",
+                             json={"email": WC_EMAIL, "password": WC_PASSWORD})
+            print(f"[AUTH] re-authenticate → {r.status_code}: {r.text[:300]}")
+
+        if r.status_code not in (200, 201):
+            raise HTTPException(500, f"Auth failed {r.status_code}: {r.text[:200]}")
+
+        payload = r.json()
+        print(f"[AUTH] token payload keys: {list(payload.keys())}")
+
+        # API may use any of these field names
+        tok = (payload.get("token")
+               or payload.get("access_token")
+               or payload.get("jwt")
+               or payload.get("accessToken")
+               or payload.get("data", {}).get("token") if isinstance(payload.get("data"), dict) else None)
+
+        if not tok:
+            raise HTTPException(500, f"No token found in auth response: {payload}")
+
+        _token = tok
+        _token_ts = time.time()
+        print("[AUTH] Token acquired ✓")
+
+    return _token
+
+
+async def wc_get(path: str) -> dict | list:
+    url = f"{BASE}{path}"
     now = time.time()
     if url in _cache and now - _cache[url]["ts"] < CACHE_TTL:
         return _cache[url]["data"]
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(url, headers=HEADERS)
+
+    token = await get_token()
+    print(f"[API] GET {path}")
+    async with httpx.AsyncClient(timeout=20) as c:
+        r = await c.get(url, headers={"Authorization": f"Bearer {token}"})
+        print(f"[API] {path} → {r.status_code}")
+
+        if r.status_code == 401:
+            global _token
+            _token = None
+            token = await get_token()
+            r = await c.get(url, headers={"Authorization": f"Bearer {token}"})
+            print(f"[API] retry {path} → {r.status_code}")
+
         if r.status_code == 429:
-            raise HTTPException(status_code=429, detail="Rate limit hit — try again in a minute")
+            raise HTTPException(429, "Rate limit — retry in 60s")
         r.raise_for_status()
+
         data = r.json()
         _cache[url] = {"data": data, "ts": now}
-        return data
 
+    return data
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def parse_date(local_date: str) -> str:
+    try:
+        dt = datetime.strptime(local_date, "%m/%d/%Y %H:%M")
+        return dt.replace(tzinfo=timezone.utc).isoformat()
+    except Exception:
+        return local_date
+
+
+def map_status(game: dict) -> str:
+    if str(game.get("finished", "")).upper() == "TRUE":
+        return "FINISHED"
+    te = str(game.get("time_elapsed", "notstarted")).strip().lower()
+    if te == "notstarted":
+        return "SCHEDULED"
+    if te == "ht":
+        return "PAUSED"
+    if te.isdigit():
+        return "IN_PLAY"
+    return "SCHEDULED"
+
+
+def map_stage(game: dict) -> str:
+    return {
+        "group": "GROUP_STAGE",
+        "r32":   "ROUND_OF_32",
+        "r16":   "ROUND_OF_16",
+        "qf":    "QUARTER_FINALS",
+        "sf":    "SEMI_FINALS",
+        "third": "THIRD_PLACE",
+        "final": "FINAL",
+    }.get((game.get("type") or "").lower(), game.get("type", ""))
+
+
+def parse_scorers(raw) -> list[str]:
+    if not raw or str(raw).strip().lower() in ("null", "none", ""):
+        return []
+    names = []
+    for part in re.split(r"[,;]", str(raw)):
+        name = re.sub(r"\d+['′]?", "", part).strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def extract_list(data, *keys) -> list:
+    """Try multiple keys to find the list inside an API response."""
+    if isinstance(data, list):
+        return data
+    for key in keys:
+        val = data.get(key)
+        if isinstance(val, list):
+            return val
+    # Last resort: return first list value found
+    for val in data.values():
+        if isinstance(val, list):
+            return val
+    return []
+
+
+async def load_teams() -> dict[str, dict]:
+    data = await wc_get("/get/teams")
+    teams_raw = extract_list(data, "teams", "data", "result")
+    print(f"[DATA] loaded {len(teams_raw)} teams")
+    return {
+        str(t.get("id", t.get("_id", ""))): {
+            "name":      t.get("name_en") or t.get("name", ""),
+            "flag":      t.get("flag", ""),
+            "fifa_code": t.get("fifa_code", ""),
+        }
+        for t in teams_raw
+    }
+
+
+async def load_games() -> list[dict]:
+    data = await wc_get("/get/games")
+    games = extract_list(data, "games", "data", "result", "matches")
+    print(f"[DATA] loaded {len(games)} games")
+    return games
+
+
+def team_from(game: dict, side: str, teams: dict) -> dict:
+    """side = 'home' or 'away'"""
+    tid   = str(game.get(f"{side}_team_id", "0"))
+    info  = teams.get(tid, {})
+    name  = info.get("name") or game.get(f"{side}_team_name_en") or game.get(f"{side}_team_label", "TBD")
+    return {"id": tid, "name": name, "shortName": name, "crest": info.get("flag", "")}
+
+
+# ── /api/matches ──────────────────────────────────────────────────────────────
 
 @app.get("/api/matches")
 async def get_matches():
-    data = await fetch(f"/competitions/{COMPETITION}/matches")
-    matches = data.get("matches", [])
+    teams = await load_teams()
+    games = await load_games()
+
     result = []
-    for m in matches:
+    for g in games:
+        home  = team_from(g, "home", teams)
+        away  = team_from(g, "away", teams)
+        status = map_status(g)
+
+        hs_raw = g.get("home_score", "0")
+        as_raw = g.get("away_score", "0")
+        home_score = int(hs_raw) if str(hs_raw).lstrip("-").isdigit() else None
+        away_score = int(as_raw) if str(as_raw).lstrip("-").isdigit() else None
+        has_score  = status == "FINISHED" and home_score is not None
+
         result.append({
-            "id": m["id"],
-            "utcDate": m["utcDate"],
-            "status": m["status"],
-            "stage": m.get("stage"),
-            "group": m.get("group"),
-            "homeTeam": m["homeTeam"],
-            "awayTeam": m["awayTeam"],
-            "score": m["score"],
-            "goals": m.get("goals", []),
-            "bookings": m.get("bookings", []),
+            "id":       g.get("id"),
+            "utcDate":  parse_date(g.get("local_date", "")),
+            "status":   status,
+            "stage":    map_stage(g),
+            "group":    g.get("group"),
+            "homeTeam": home,
+            "awayTeam": away,
+            "score": {
+                "fullTime": {"home": home_score if has_score else None,
+                             "away": away_score if has_score else None},
+                "halfTime": {"home": None, "away": None},
+            },
         })
+
     return {"matches": result}
 
 
+# ── /api/stats ────────────────────────────────────────────────────────────────
+
 @app.get("/api/stats")
 async def get_stats():
-    data = await fetch(f"/competitions/{COMPETITION}/matches")
-    matches = data.get("matches", [])
+    teams = await load_teams()
+    games = await load_games()
 
-    cards_by_team: dict[str, dict] = defaultdict(lambda: {"name": "", "crest": "", "red": 0, "yellow": 0, "total": 0, "played": 0})
-    goals_by_team: dict[str, dict] = defaultdict(lambda: {"name": "", "crest": "", "scored": 0, "played": 0})
-    fastest_goals: list = []
-    hat_tricks: list = []
+    goals_by_team: dict[str, dict] = defaultdict(
+        lambda: {"name": "", "crest": "", "scored": 0, "played": 0}
+    )
+    hat_tricks: list            = []
     hat_trick_race_entries: list = []
-    most_goals_single: list = []
+    most_goals_single: list     = []
 
-    for m in matches:
-        if m["status"] not in ("FINISHED",):
+    for g in games:
+        if map_status(g) != "FINISHED":
             continue
 
-        home_id = str(m["homeTeam"]["id"])
-        away_id = str(m["awayTeam"]["id"])
-        home_name = m["homeTeam"].get("shortName") or m["homeTeam"].get("name", "")
-        away_name = m["awayTeam"].get("shortName") or m["awayTeam"].get("name", "")
-        home_crest = m["homeTeam"].get("crest", "")
-        away_crest = m["awayTeam"].get("crest", "")
+        home       = team_from(g, "home", teams)
+        away       = team_from(g, "away", teams)
+        home_name  = home["name"]
+        away_name  = away["name"]
+        home_crest = home["crest"]
+        away_crest = away["crest"]
+        match_date = parse_date(g.get("local_date", ""))
 
-        # Goals per team
-        for tid, tname, tcrest in [(home_id, home_name, home_crest), (away_id, away_name, away_crest)]:
-            goals_by_team[tid]["name"] = tname
-            goals_by_team[tid]["crest"] = tcrest
-            goals_by_team[tid]["played"] += 1
-        home_score = (m["score"].get("fullTime") or {}).get("home") or 0
-        away_score = (m["score"].get("fullTime") or {}).get("away") or 0
-        goals_by_team[home_id]["scored"] += home_score
-        goals_by_team[away_id]["scored"] += away_score
+        hs_raw = g.get("home_score", "0")
+        as_raw = g.get("away_score", "0")
+        home_score = int(hs_raw) if str(hs_raw).lstrip("-").isdigit() else 0
+        away_score = int(as_raw) if str(as_raw).lstrip("-").isdigit() else 0
 
-        # Cards per team
-        for booking in m.get("bookings", []):
-            team_id = str((booking.get("team") or {}).get("id", ""))
-            if not team_id:
+        for tid, tname, tcrest, tsc in [
+            (home["id"], home_name, home_crest, home_score),
+            (away["id"], away_name, away_crest, away_score),
+        ]:
+            if not tid or tid == "0":
                 continue
-            team_name = (booking.get("team") or {}).get("shortName") or (booking.get("team") or {}).get("name", "")
-            team_crest = (booking.get("team") or {}).get("crest", "")
-            cards_by_team[team_id]["name"] = team_name
-            cards_by_team[team_id]["crest"] = team_crest
-            card_type = booking.get("card", "")
-            if "RED" in card_type:
-                cards_by_team[team_id]["red"] += 1
-            else:
-                cards_by_team[team_id]["yellow"] += 1
-            cards_by_team[team_id]["total"] += 1
+            goals_by_team[tid]["name"]    = tname
+            goals_by_team[tid]["crest"]   = tcrest
+            goals_by_team[tid]["scored"] += tsc
+            goals_by_team[tid]["played"] += 1
 
-        # Fastest goals and hat-tricks from goals list
-        goals = m.get("goals", [])
-        player_goals: dict[str, dict] = defaultdict(lambda: {"count": 0, "name": "", "team": "", "crest": "", "minutes": []})
-        for g in goals:
-            minute = g.get("minute")
-            player = g.get("scorer", {})
-            player_id = str(player.get("id", ""))
-            player_name = player.get("name", "Unknown")
-            team = g.get("team", {})
-            team_name = team.get("shortName") or team.get("name", "")
-            team_crest = team.get("crest", "")
-            team_id_g = str(team.get("id", ""))
+        for raw_scorers, side_name, side_crest in [
+            (g.get("home_scorers"), home_name, home_crest),
+            (g.get("away_scorers"), away_name, away_crest),
+        ]:
+            names = parse_scorers(raw_scorers)
+            counts: dict[str, int] = defaultdict(int)
+            for n in names:
+                counts[n] += 1
+            for player_name, count in counts.items():
+                entry = {
+                    "player":    player_name,
+                    "team":      side_name,
+                    "crest":     side_crest,
+                    "goals":     count,
+                    "matchDate": match_date,
+                    "home":      home_name,
+                    "away":      away_name,
+                }
+                hat_trick_race_entries.append(entry)
+                if count >= 3:
+                    hat_tricks.append(entry)
 
-            if minute is not None:
-                fastest_goals.append({
-                    "player": player_name,
-                    "team": team_name,
-                    "teamId": team_id_g,
-                    "crest": team_crest,
-                    "minute": minute,
-                    "matchDate": m["utcDate"],
-                    "home": home_name,
-                    "away": away_name,
-                })
-
-            if player_id:
-                player_goals[player_id]["count"] += 1
-                player_goals[player_id]["name"] = player_name
-                player_goals[player_id]["team"] = team_name
-                player_goals[player_id]["crest"] = team_crest
-                player_goals[player_id]["minutes"].append(minute)
-
-        for pid, pg in player_goals.items():
-            if pg["count"] >= 3:
-                hat_tricks.append({
-                    "player": pg["name"],
-                    "team": pg["team"],
-                    "crest": pg["crest"],
-                    "goals": pg["count"],
-                    "matchDate": m["utcDate"],
-                    "home": home_name,
-                    "away": away_name,
-                })
-            # Track each player's best single-game tally for the hat-trick race
-            key = f"{pid}_{m['id']}"
-            hat_trick_race_entries.append({
-                "player": pg["name"],
-                "team": pg["team"],
-                "crest": pg["crest"],
-                "goals": pg["count"],
-                "matchDate": m["utcDate"],
-                "home": home_name,
-                "away": away_name,
-            })
-
-        total_goals = home_score + away_score
         most_goals_single.append({
-            "home": home_name,
-            "homeCrest": home_crest,
-            "homeScore": home_score,
-            "away": away_name,
-            "awayCrest": away_crest,
-            "awayScore": away_score,
-            "total": total_goals,
-            "date": m["utcDate"],
+            "home": home_name, "homeCrest": home_crest, "homeScore": home_score,
+            "away": away_name, "awayCrest": away_crest, "awayScore": away_score,
+            "total": home_score + away_score,
+            "date": match_date,
         })
 
-    # Sort
-    cards_list = sorted(cards_by_team.values(), key=lambda x: x["total"], reverse=True)
-    goals_list = [g for g in goals_by_team.values() if g["played"] > 0]
-    goals_list_least = sorted(goals_list, key=lambda x: (x["scored"], -x["played"]))
-    fastest_goals_sorted = sorted(fastest_goals, key=lambda x: x["minute"])
+    goals_list_least         = sorted([g for g in goals_by_team.values() if g["played"] > 0],
+                                       key=lambda x: (x["scored"], -x["played"]))
     most_goals_single_sorted = sorted(most_goals_single, key=lambda x: x["total"], reverse=True)
-
-    # Hat-trick winner: first one chronologically
-    hat_trick_winner = None
-    if hat_tricks:
-        hat_trick_winner = sorted(hat_tricks, key=lambda x: x["matchDate"])[0]
-
-    # Hat-trick race: best single-game tally per player, sorted desc, top 10
-    hat_trick_race_sorted = sorted(hat_trick_race_entries, key=lambda x: (-x["goals"], x["matchDate"]))
+    hat_trick_race_sorted    = sorted(hat_trick_race_entries, key=lambda x: (-x["goals"], x["matchDate"]))
+    hat_trick_winner         = sorted(hat_tricks, key=lambda x: x["matchDate"])[0] if hat_tricks else None
 
     return {
-        "mostCards": cards_list[:10],
-        "leastGoals": goals_list_least[:10],
-        "fastestGoals": fastest_goals_sorted[:10],
-        "hatTrick": hat_trick_winner,
-        "hatTrickRace": hat_trick_race_sorted[:10],
+        "mostCards":           [],
+        "leastGoals":          goals_list_least[:10],
+        "fastestGoals":        [],
+        "hatTrick":            hat_trick_winner,
+        "hatTrickRace":        hat_trick_race_sorted[:10],
         "mostGoalsSingleGame": most_goals_single_sorted[:5],
     }
 
 
+# ── /api/debug — shows raw API responses to help diagnose issues ──────────────
+
+@app.get("/api/debug")
+async def debug():
+    try:
+        token = await get_token()
+        games_raw = await wc_get("/get/games")
+        teams_raw = await wc_get("/get/teams")
+        games_sample = games_raw[:2] if isinstance(games_raw, list) else games_raw
+        teams_sample = teams_raw[:2] if isinstance(teams_raw, list) else teams_raw
+        return {
+            "auth": "ok",
+            "games_type": type(games_raw).__name__,
+            "games_keys": list(games_raw.keys()) if isinstance(games_raw, dict) else "list",
+            "games_count": len(games_raw) if isinstance(games_raw, list) else len(games_raw.get(next(iter(games_raw)), [])),
+            "games_sample": games_sample,
+            "teams_type": type(teams_raw).__name__,
+            "teams_keys": list(teams_raw.keys()) if isinstance(teams_raw, dict) else "list",
+            "teams_sample": teams_sample,
+        }
+    except Exception as e:
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
+
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "apiKeySet": bool(API_KEY)}
+    return {"ok": True, "source": "worldcup26.ir"}

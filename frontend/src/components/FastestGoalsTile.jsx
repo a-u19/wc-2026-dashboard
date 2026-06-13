@@ -9,7 +9,11 @@ export default function FastestGoalsTile({ data = [] }) {
   return (
     <TileShell title="Fastest Goals" icon="⚡">
       {top3.length === 0 ? (
-        <p className="text-tx-3 text-sm text-center py-4">No goal data yet</p>
+        <div className="text-center py-5">
+          <p className="text-2xl mb-1">⚡</p>
+          <p className="text-tx-2 text-sm font-medium">Not available</p>
+          <p className="text-tx-3 text-xs mt-1">The data source doesn't provide goal minute data</p>
+        </div>
       ) : (
         top3.map((g, i) => (
           <motion.div

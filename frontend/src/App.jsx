@@ -23,8 +23,8 @@ function ErrorBanner({ message }) {
           <p className="font-semibold">API Error</p>
           <p className="text-red-500 dark:text-red-400/70 text-xs mt-0.5">{message}</p>
           <p className="text-red-400/70 text-xs mt-1">
-            Make sure <code className="bg-black/10 dark:bg-white/10 px-1 rounded">FOOTBALL_API_KEY</code> is set in{' '}
-            <code className="bg-black/10 dark:bg-white/10 px-1 rounded">backend/.env</code> and the Python server is running.
+            Make sure the Python backend is running (<code className="bg-black/10 dark:bg-white/10 px-1 rounded">start.bat</code>).
+            Check the backend terminal window for the full error.
           </p>
         </div>
       </div>
