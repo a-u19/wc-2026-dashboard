@@ -194,13 +194,18 @@ const BROADCASTER_STYLE = {
 
 // ── Match card ─────────────────────────────────────────────────────────────────
 function MatchCard({ m, index }) {
-  const date = parseISO(m.utcDate)
+  const broadcast = getBroadcast(m)
+  // API local_date is stamped as UTC but is actually venue local time — use BST kickoff from
+  // broadcast schedule when available, otherwise fall back to the (incorrect) utcDate
+  const displayTime = broadcast ? broadcast.kickoffBst : format(parseISO(m.utcDate), 'HH:mm')
+  const displayDate = broadcast
+    ? format(parseISO(broadcast.date), 'EEE d MMM yyyy')
+    : format(parseISO(m.utcDate), 'EEE d MMM yyyy')
   const badge = STATUS_BADGE[m.status] || { label: m.status, cls: 'bg-surface text-tx-2' }
   const isLive = m.status === 'IN_PLAY' || m.status === 'PAUSED'
   const homeScore = m.score?.fullTime?.home ?? m.score?.halfTime?.home ?? null
   const awayScore = m.score?.fullTime?.away ?? m.score?.halfTime?.away ?? null
   const hasScore = homeScore !== null
-  const broadcast = getBroadcast(m)
 
   return (
     <motion.div
@@ -239,7 +244,7 @@ function MatchCard({ m, index }) {
               {homeScore} – {awayScore}
             </span>
           ) : (
-            <span className="text-tx-3 text-xs font-medium">{format(date, 'HH:mm')}</span>
+            <span className="text-tx-3 text-xs font-medium">{displayTime}</span>
           )}
         </div>
 
@@ -250,7 +255,7 @@ function MatchCard({ m, index }) {
       </div>
 
       {!hasScore && (
-        <p className="text-xs text-tx-3 text-center mt-1">{format(date, 'EEE d MMM yyyy')}</p>
+        <p className="text-xs text-tx-3 text-center mt-1">{displayDate}</p>
       )}
     </motion.div>
   )
