@@ -227,8 +227,10 @@ def parse_scorers(raw) -> list[tuple[str, str | None]]:
         token = part.strip().strip('"').strip()
         if not token or re.search(r'\(OG\)', token, re.IGNORECASE):
             continue
-        # Minute formats: "9'", "45'+5", "45'+5'" (API includes trailing prime on extra time)
-        m = re.search(r"\s+(\d+'(?:\+\d+'?)?)\s*$", token)
+        # Strip trailing penalty/assist notation: (p), (P), (og) already excluded above
+        token = re.sub(r'\s*\([a-zA-Z]+\)\s*$', '', token).strip()
+        # Minute formats: "9'", "45'+5'", "45'+5", "90+6'" (prime may be before or after +N)
+        m = re.search(r"\s+(\d+(?:'\+\d+'?|\+\d+'|'))\s*$", token)
         if m:
             minute = m.group(1)
             name = token[:m.start()].strip()

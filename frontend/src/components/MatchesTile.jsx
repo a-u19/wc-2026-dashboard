@@ -281,9 +281,7 @@ function MatchCard({ m, index }) {
         </div>
       </div>
 
-      {!hasScore && (
-        <p className="text-xs text-tx-3 text-center mt-1">{displayDate}</p>
-      )}
+      <p className="text-xs text-tx-3 text-center mt-1">{displayDate}</p>
     </motion.div>
   )
 }
@@ -322,7 +320,9 @@ export default function MatchesTile({ matches = [] }) {
     const upcoming = matches
       .filter(m => (m.status === 'SCHEDULED' || m.status === 'TIMED') && !liveIds.has(m.id))
       .sort((a, b) => getMatchSortKey(a).localeCompare(getMatchSortKey(b)))
-    const past = matches.filter(m => m.status === 'FINISHED').reverse()
+    const past = matches
+      .filter(m => m.status === 'FINISHED')
+      .sort((a, b) => getMatchSortKey(b).localeCompare(getMatchSortKey(a))) // most recent first
     return { live, upcoming, past }
   }, [matches])
 
