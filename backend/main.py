@@ -128,27 +128,41 @@ async def wc_get(path: str) -> dict | list:
     if url in _cache and now - _cache[url]["ts"] < CACHE_TTL:
         return _cache[url]["data"]
 
-    token = await get_token()
-    print(f"[API] GET {path}")
-    async with httpx.AsyncClient(timeout=20) as c:
-        r = await c.get(url, headers={"Authorization": f"Bearer {token}"})
-        print(f"[API] {path} → {r.status_code}")
-
-        if r.status_code == 401:
-            global _token
-            _token = None
+    last_err = None
+    for attempt in range(3):
+        try:
             token = await get_token()
-            r = await c.get(url, headers={"Authorization": f"Bearer {token}"})
-            print(f"[API] retry {path} → {r.status_code}")
+            print(f"[API] GET {path} (attempt {attempt + 1})")
+            async with httpx.AsyncClient(timeout=20) as c:
+                r = await c.get(url, headers={"Authorization": f"Bearer {token}"})
+                print(f"[API] {path} → {r.status_code}")
 
-        if r.status_code == 429:
-            raise HTTPException(429, "Rate limit — retry in 60s")
-        r.raise_for_status()
+                if r.status_code == 401:
+                    global _token
+                    _token = None
+                    token = await get_token()
+                    r = await c.get(url, headers={"Authorization": f"Bearer {token}"})
 
-        data = r.json()
-        _cache[url] = {"data": data, "ts": now}
+                if r.status_code == 429:
+                    raise HTTPException(429, "Rate limit — retry in 60s")
+                r.raise_for_status()
 
-    return data
+                data = r.json()
+                _cache[url] = {"data": data, "ts": now}
+                return data
+        except HTTPException:
+            raise
+        except Exception as e:
+            last_err = e
+            print(f"[API] {path} attempt {attempt + 1} failed: {e}")
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)  # 0s, 2s, 4s
+
+    # All retries failed — serve stale cache if available, else raise
+    if url in _cache:
+        print(f"[API] Serving stale cache for {path} after {last_err}")
+        return _cache[url]["data"]
+    raise HTTPException(503, f"Upstream unavailable after 3 attempts: {last_err}")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
