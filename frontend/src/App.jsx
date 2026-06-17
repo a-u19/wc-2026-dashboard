@@ -64,15 +64,11 @@ export default function App() {
   const fetchAll = useCallback(async (showSpinner = false) => {
     if (showSpinner) setLoading(true)
     try {
-      const [mRes, sRes] = await Promise.all([
-        fetch(`${API}/api/matches`),
-        fetch(`${API}/api/stats`),
-      ])
-      if (!mRes.ok) throw new Error(await mRes.text())
-      if (!sRes.ok) throw new Error(await sRes.text())
-      const [mData, sData] = await Promise.all([mRes.json(), sRes.json()])
-      setMatches(mData.matches || [])
-      setStats(sData)
+      const res = await fetch(`${API}/api/dashboard`)
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+      setMatches(data.matches || [])
+      setStats(data)
       setError(null)
       setLastUpdated(new Date())
     } catch (e) {

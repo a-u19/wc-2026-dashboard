@@ -24,19 +24,26 @@ app = FastAPI(title="World Cup 2026 API")
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(cards_fetcher.background_loop())
-    asyncio.create_task(_prewarm_cache())
+    asyncio.create_task(_background_refresh())
 
-async def _prewarm_cache():
-    """Fetch match + team data on startup so first page load is instant."""
+async def _background_refresh():
+    """Proactively keep teams + games cache warm every 60s so requests always hit cache."""
+    # Initial fetch
     try:
         await load_teams()
         await load_games()
-        print("[STARTUP] Cache pre-warmed.")
+        print("[REFRESH] Initial cache warm done.")
     except Exception as e:
-        print(f"[STARTUP] Pre-warm failed: {e}")
+        print(f"[REFRESH] Initial warm failed: {e}")
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await load_teams()
+            await load_games()
+        except Exception as e:
+            print(f"[REFRESH] Background refresh error: {e}")
 
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
-app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 @app.exception_handler(Exception)
@@ -417,6 +424,15 @@ async def get_stats():
         "hatTrickRace":        hat_trick_race_sorted[:3],
         "mostGoalsSingleGame": most_goals_single_sorted[:5],
     }
+
+
+# ── /api/dashboard — combined endpoint (one round-trip) ─────────────────────
+
+@app.get("/api/dashboard")
+async def get_dashboard():
+    matches_data = await get_matches()
+    stats_data   = await get_stats()
+    return {**matches_data, **stats_data}
 
 
 # ── /api/cards/status ────────────────────────────────────────────────────────
